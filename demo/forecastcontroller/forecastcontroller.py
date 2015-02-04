@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
+# Lancer l'exemple depuis ./demo :
+# python forecastcontroller/forecastcontroller.py
 
-# from gridsim.core import Simulator
-# from gridsim.recorder import PlotRecorder, RecorderInterface
-# from gridsim.electrical import ElectricalPQBus, ElectricalTransmissionLine
-# from gridsim.thermal import ThermalProcess, ThermalCoupling, ConstantTemperatureProcess, TimeSeriesThermalProcess
-# from gridsim.electrothermal import ElectroThermalHeaterCooler
-from agregator import ForecastController, AgregatorSimulator
-# from gridsim.controller import Thermostat
+import sys, os
+sys.path.append(os.path.abspath("../"))
 
 from gridsim.unit import units
 from gridsim.util import Position
@@ -21,8 +18,10 @@ from gridsim.electrical.loadflow import DirectLoadFlowCalculator
 from gridsim.timeseries import SortedConstantStepTimeSeriesObject
 from gridsim.iodata.input import CSVReader
 from gridsim.iodata.output import FigureSaver
-
 from gridsim.controller import AbstractControllerElement
+
+# Import des outils utiles pour cet exemples
+from agregator import ForecastController, AgregatorSimulator
 
 import random
 
@@ -75,6 +74,7 @@ class ElectroThermalHeaterCooler(AbstractElectricalCPSElement):
 
 # Create simulator.
 sim = Simulator()
+sim.electrical.load_flow_calculator = DirectLoadFlowCalculator()
 
 START = 0 #6 * units.month
 DURATION = 2 * units.day
@@ -105,13 +105,13 @@ lstForecast = []
 lstHeater = []
 
 MIN = 1
-MAX = 20
+MAX = 1#20
 for i in range (MIN, MAX + 1):
       size = random.randint(500,4000) #600
       power = random.randint(500,4000)
       hysteresis = random.randint(1,4)
       coupling = COUPLING_OUTSIDE + random.randint(-15,20)
-      temperature = TEMPERATURE_INIT + random.randint(-5, 10)
+      temperature = units(TEMPERATURE_INIT + random.randint(-5, 10), units.degC)
 
       print "building %i" %i, ":"
       print "- size:", size
@@ -124,10 +124,12 @@ for i in range (MIN, MAX + 1):
                                                      size*units.meter*units.meter,
                                                      2.5*units.meter,
                                                      units.convert(temperature, units.kelvin)))
+      print "_____", building.thermal_capacity * building._mass
       coupling_outside = sim.thermal.add(ThermalCoupling('building %i to outside' % i, 
                                                          coupling*units.thermal_conductivity,
                                                          building,
                                                          outside))
+
       heater = sim.electrical.add(ElectroThermalHeaterCooler('heater %i' %i, 
                                                              power*units.kilowatt,
                                                              1.0,
@@ -139,14 +141,13 @@ for i in range (MIN, MAX + 1):
       forecastController.add(outside, coupling_outside)
       forecastController.max_day_historic = 20
 
-      lstForecast += [forecastController]
+      # lstForecast += [forecastController]
       lstTemperatureMonitoring += [building]
       lstHeater += [heater]
 
 
 
-
-sim.agregator.decision_time = units.value(units.day)
+sim.agregator.decision_time = 1*units.day
 sim.agregator.outside_process = outside
 
 
@@ -216,33 +217,28 @@ sim.agregator.outside_process = outside
 
 
 # Create a plot recorder that records the temperatures of all thermal processes.
-temp = PlotRecorder('temperatures')
-sim.record(temp, lstTemperatureMonitoring)
+# temp = PlotRecorder('temperatures')
+# sim.record(temp, lstTemperatureMonitoring)
+# 
+# # Create a plot recorder that records the power used by the electrical heater.
+# power = PlotRecorder('delta_energy')
+# sim.record(power, lstHeater,
+#            lambda context: context.value / context.delta_time)
+# 
+# # Create a plot recorder that records the cost
+# cost = PlotRecorder('_instant_cost')
+# sim.record(cost, [lstForecast[0]],
+#            lambda context: context.value)
+# 
+# error = PlotRecorder('Error')
+# sim.record(error, lstForecast,
+#            lambda context: context.value)
+# 
+# mean = PlotRecorder('Moyenne')
+# sim.record(mean, lstForecast,
+#            lambda context: context.value)
 
-# Create a plot recorder that records the power used by the electrical heater.
-power = PlotRecorder('delta_energy')
-sim.record(power, lstHeater,
-           lambda context: context.value / context.delta_time)
 
-# Create a plot recorder that records the cost
-cost = PlotRecorder('_instant_cost')
-sim.record(cost, [lstForecast[0]],
-           lambda context: context.value)
-
-error = PlotRecorder('Error')
-sim.record(error, lstForecast,
-           lambda context: context.value)
-
-mean = PlotRecorder('Moyenne')
-sim.record(mean, lstForecast,
-           lambda context: context.value)
-
-# sim.record(TextFileRecorder('log.txt', '{time} seconds : {name}.{attribute} is {value}\n'),
-#            [forecastController], 'error')
-# sim.record(TextFileRecorder('temperature.txt', '{time} seconds : {name}.{attribute} is {value}\n'),
-#            [building, convergent_room], 'temperature')
-
-# print sim.thermal.find(has_attribute='cost_vector'), "<<<<"
 
 # Simulate
 sim.reset()
@@ -269,11 +265,11 @@ for forecastController in lstForecast:
 
 
 # Outputs
-FigureSaver(temp, "Temperature").save('./output/temperature.png')
-FigureSaver(power, "Power").save('./output/heater.png')
-FigureSaver(cost, "Cost").save('./output/cost.png')
-FigureSaver(error, "Erreur").save('./output/error.png')
-FigureSaver(mean, "Moyenne").save('./output/mean.png')
+# FigureSaver(temp, "Temperature").save('./output/temperature.png')
+# FigureSaver(power, "Power").save('./output/heater.png')
+# FigureSaver(cost, "Cost").save('./output/cost.png')
+# FigureSaver(error, "Erreur").save('./output/error.png')
+# FigureSaver(mean, "Moyenne").save('./output/mean.png')
 
 
 

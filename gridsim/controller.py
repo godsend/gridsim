@@ -95,7 +95,9 @@ class ControllerSimulator(AbstractSimulationModule):
         .. seealso:: :func:`gridsim.core.AbstractSimulationModule.update`.
         """
         for controller in self._controllers:
+            print controller
             controller.update(time, delta_time)
+            
 
     @accepts((1, AbstractControllerElement))
     def add(self, element):

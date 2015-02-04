@@ -1,3 +1,6 @@
+import sys, os
+sys.path.append(os.path.abspath("../"))
+
 from gridsim.unit import units
 from gridsim.util import Position
 from gridsim.simulation import Simulator
@@ -198,7 +201,7 @@ room = sim.thermal.add(ThermalProcess.room('room',
                                            50*units.meter*units.meter,
                                            2.5*units.metre,
                                            units.convert(celsius, units.kelvin)))
-
+print room.thermal_capacity
 outside = sim.thermal.add(
     TimeSeriesThermalProcess('outside', SortedConstantStepTimeSeriesObject(CSVReader()),
                              './data/example_time_series.csv',

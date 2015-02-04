@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import sys, os
+sys.path.append(os.path.abspath("../"))
 
 from gridsim.simulation import Simulator, AbstractSimulationModule, AbstractSimulationElement, Position
 from gridsim.controller import ControllerSimulator, AbstractControllerElement
@@ -17,7 +19,104 @@ from deap import tools
 from deap import algorithms
 
 
-# A very simple simulation element of the minimal simulation module example: tracks only the time.
+
+class AgregatorSimulator(ControllerSimulator):
+   
+    def __init__(self): 
+        super(AgregatorSimulator, self).__init__()
+        self._decision_time = 0
+
+        self.outside_process = None
+        self.outside_temperature = {}
+        self.temperature = 0
+
+    @property
+    def decision_time(self):
+        return self._decision_time
+    @decision_time.setter
+    def decision_time(self,value):
+        self._decision_time = units.value(units.convert(value, units.second))
+
+    def attribute_name(self):
+        return 'agregator'
+
+    def add(self, element):
+        """
+        Adds the control element to the controller simulation module.
+
+        :param element: Element to add to the control simulator module.
+        """
+        if isinstance(element, AgregatorElement):
+            element.id = len(self._controllers)
+            self._controllers.append(element)
+            return element
+
+    def calculate(self, time, delta_time):
+        """
+        ...
+        """
+
+        common_unit = units.unit(units.convert(time, units.second))
+        time = units.value(units.convert(time, units.second))
+        delta_time = units.value(units.convert(delta_time, units.second))
+
+
+        #
+        # Decision time
+        #
+        if int(time) % int(self._decision_time) == 0:
+
+            starting_time = time
+            ending_time = time + self._decision_time
+
+            # Example of costs
+            _cost = [0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0, \
+                     2.0,2.0,3.0,3.0,4.0,4.0,2.0,2.0,2.0,2.0, \
+                     5.0,5.0,7.0,7.0,10.0,10.0,10.0,10.0,8.0,8.0, \
+                     4.0,4.0,3.0,3.0,4.0,4.0,6.0,6.0,8.0,8.0, \
+                     5.0,5.0,2.0,2.0,1.0,1.0,0.0,0.0,0.0]
+            
+            j = 0
+            cost = {}
+            for i in range(int(time), int(time + self._decision_time), int(delta_time)):
+                cost[i] = max(0, _cost[j] + random.normalvariate(0, 1))
+                j += 1
+
+            # Add the first cost for the day next
+            # TODO: Improve procedure without this fix
+            cost[int(time + self._decision_time)] = _cost[0]
+
+            for controller in self._controllers:         
+                # Push the cost & Compute
+                controller.cost = cost
+                controller.outside_temperature_forecast = self.__temperature(time, time + self._decision_time + delta_time, delta_time, common_unit)
+
+            
+        #
+        # Rest of the time
+        #
+        for controller in self._controllers:  
+            controller.calculate(time, delta_time)
+
+    def __temperature(self, start, stop, delta_time, common_unit):
+
+        if self.outside_process is not None:
+            temperature_outside_forecast = {}
+            for k in range(int(start), int(start+stop), int(delta_time)):
+                self.outside_process.set_time(units(k, common_unit))
+                corr = random.normalvariate(0, 0.5)
+                # corr = 0
+                # corr = 4
+                # if k > (start+stop)/2:
+                #     corr = -1
+
+                temperature_outside_forecast[k] = units.value(units.convert(getattr(self.outside_process, "temperature"), units.celsius)) + corr
+            return temperature_outside_forecast
+        else:
+            return self.outside_temperature
+
+
+
 class AgregatorElement(AbstractControllerElement):
 
     def __init__(self, friendly_name, position=Position()):
@@ -39,92 +138,6 @@ class AgregatorElement(AbstractControllerElement):
         pass
     def total_power(self):
         pass
-
-class AgregatorSimulator(ControllerSimulator):
-   
-    def __init__(self): 
-        super(AgregatorSimulator, self).__init__()
-        self.decision_time = 0
-
-        self.outside_process = None
-        self.outside_temperature = {}
-        self.temperature = 0
-
-    def attribute_name(self):
-        return 'agregator'
-
-    def add(self, element):
-        """
-        Adds the control element to the controller simulation module.
-
-        :param element: Element to add to the control simulator module.
-        """
-        if isinstance(element, AgregatorElement):
-            element.id = len(self._controllers)
-            self._controllers.append(element)
-            return element
-
-    def calculate(self, time, delta_time):
-        """
-        ...
-        """
-
-
-
-        #
-        # Decision time
-        #
-        if int(time) % int(self.decision_time) == 0:
-
-            starting_time = time
-            ending_time = time + self.decision_time
-
-            # Example of costs
-            _cost = [0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,2.0,\
-                     2.0,3.0,3.0,4.0,4.0,2.0,2.0,2.0,2.0,5.0,5.0,\
-                     7.0,7.0,10.0,10.0,10.0,10.0,8.0,8.0,4.0,4.0,\
-                     3.0,3.0,4.0,4.0,6.0,6.0,8.0,8.0,5.0,5.0,2.0,\
-                     2.0,1.0,1.0,0.0,0.0,0.0]
-            
-            j = 0
-            cost = {}
-            for i in range(int(time), int(time + self.decision_time), int(delta_time)):
-                cost[i] = max(0, _cost[j] + random.normalvariate(0, 1))
-                j += 1
-
-            # Add the first cost for the day next
-            # TODO: Improve procedure without this fix
-            cost[int(time + self.decision_time)] = _cost[0]
-
-            for controller in self._controllers:         
-                # Push the cost & Compute
-                controller.cost = cost
-                controller.outside_temperature_forecast = self.__temperature(time, time + self.decision_time + delta_time, delta_time)
-
-            
-        #
-        # Rest of the time
-        #
-        for controller in self._controllers:  
-            controller.calculate(time, delta_time)
-
-    def __temperature(self, start, stop, delta_time):
-        if self.outside_process is not None:
-            temperature_outside_forecast = {}
-            for k in range(int(start), int(start+stop), int(delta_time)):
-                self.outside_process.set_time(k)
-                corr = random.normalvariate(0, 0.5)
-                # corr = 0
-                # corr = 4
-                # if k > (start+stop)/2:
-                #     corr = -1
-
-                temperature_outside_forecast[k] = getattr(self.outside_process, "temperature") + corr
-            return temperature_outside_forecast
-        else:
-            return self.outside_temperature
-
-
 
 
 class ForecastController(AgregatorElement):
@@ -214,12 +227,12 @@ class ForecastController(AgregatorElement):
         Value to set in order to turn the element off.
         """
 
-        self.decision_time = int(units.value(decision_time))
+        self.decision_time = int(units.value(units.convert(decision_time, units.second)))
         """
         Value of decision time. The optimization will be computed each step
         """
 
-        self.delta_time = int(units.value(delta_time))
+        self.delta_time = int(units.value(units.convert(delta_time, units.second)))
         """
         Value of the unit of time used to decide the optimized comsumption
         """
@@ -286,8 +299,10 @@ class ForecastController(AgregatorElement):
 
         # Value importation
         # external_thermal_element = self._outside_process # Get the temperature at time t
-        thermal_conductivity = getattr(self._outside_coupling, "thermal_conductivity") # with couple
+        thermal_conductivity = units.value(getattr(self._outside_coupling, "thermal_conductivity")) # with couple
         thermal_capacity = self.thermal_process.thermal_capacity
+        print "A", self.thermal_process
+        print "B", self.thermal_process.thermal_capacity
         if thermal_capacity == 0:
             raise RuntimeError("Thermal capacity must be greater than zero")
 
@@ -346,12 +361,13 @@ class ForecastController(AgregatorElement):
 
         if correction == None:
             for t in range(starting_time, ending_time, self.delta_time):
+
                 outside_leverage = self.__external_leverage(\
                     thermal_capacity = thermal_capacity, \
                     thermal_conductivity = thermal_conductivity, \
                     external_temperature = temperature[t], \
                     internal_temperature = initial_temperature[t])
-
+                print outside_leverage
                 inner_production = self.__internal_production( \
                     internal_temperature = initial_temperature[t], \
                     power_on = _power_on[t], \
@@ -901,7 +917,7 @@ class ForecastController(AgregatorElement):
         self._output_value = self.on_value if int(self._power_on[time + delta_time]) == 1 else self.off_value
 
 
-    def update(self):
+    def update(self, time, delta_time):
         """
         AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.update`.
         """
@@ -934,6 +950,10 @@ class ForecastController(AgregatorElement):
         return self._total_power
 
     def __external_leverage(self, thermal_capacity, thermal_conductivity, external_temperature, internal_temperature):
+        print thermal_capacity
+        print thermal_conductivity
+        print external_temperature
+        print internal_temperature
         return (self.delta_time / thermal_capacity) * (thermal_conductivity * (external_temperature - internal_temperature))
 
     def __internal_production(self, internal_temperature, power_on, subject_efficiency, subject_energy, thermal_capacity):

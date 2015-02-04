@@ -376,8 +376,11 @@ class Simulator(object):
         :param delta_time: The delta time for the single step.
         :type delta_time: time, see :mod:`gridsim.unit`
         """
+        print "titi1"
         self._calculate(delta_time)
+        print "titi2"
         self.time += delta_time
+        print "titi3"
         self._update(delta_time)
 
     @accepts(((1, 2), units.Quantity))
@@ -397,13 +400,17 @@ class Simulator(object):
         :param delta_time: Time interval for the simulation.
         :type delta_time: time, see :mod:`gridsim.unit`
         """
+        print "toto"
         if self.time is None:
             self.reset()
 
         end_time = self.time + run_time
+        print "toto2"
         self._update(delta_time)
+        print "toto3"
         while self.time < end_time:
             self.step(delta_time)
+        print "toto4"
 
     # Internal class. Holds a recorder and the binding of the recorder to an
     # attribute of an object.
