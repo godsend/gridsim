@@ -77,7 +77,7 @@ sim = Simulator()
 sim.electrical.load_flow_calculator = DirectLoadFlowCalculator()
 
 START = 0 #6 * units.month
-DURATION = 2 * units.day
+DURATION = 1 * units.day
 STEP = 30 * units.minute
 
 
@@ -109,7 +109,7 @@ MAX = 1#20
 for i in range (MIN, MAX + 1):
       size = random.randint(500,4000) #600
       power = random.randint(500,4000)
-      hysteresis = random.randint(1,4)
+      hysteresis = random.randint(1,3)
       coupling = COUPLING_OUTSIDE + random.randint(-15,20)
       temperature = units(TEMPERATURE_INIT + random.randint(-5, 10), units.degC)
 
@@ -124,14 +124,18 @@ for i in range (MIN, MAX + 1):
                                                      size*units.meter*units.meter,
                                                      2.5*units.meter,
                                                      units.convert(temperature, units.kelvin)))
-      print "_____", building.thermal_capacity * building._mass
+      # The controller need this method /!\
+      building.thermal_volumic_capacity = building.thermal_capacity * building._mass
+
+      #print "_____", building.thermal_volumic_capacity
+
       coupling_outside = sim.thermal.add(ThermalCoupling('building %i to outside' % i, 
                                                          coupling*units.thermal_conductivity,
                                                          building,
                                                          outside))
 
       heater = sim.electrical.add(ElectroThermalHeaterCooler('heater %i' %i, 
-                                                             power*units.kilowatt,
+                                                             power*units.watt,
                                                              1.0,
                                                              building))
       sim.electrical.attach(bus0, heater)
@@ -141,7 +145,7 @@ for i in range (MIN, MAX + 1):
       forecastController.add(outside, coupling_outside)
       forecastController.max_day_historic = 20
 
-      # lstForecast += [forecastController]
+      lstForecast += [forecastController]
       lstTemperatureMonitoring += [building]
       lstHeater += [heater]
 
@@ -149,10 +153,6 @@ for i in range (MIN, MAX + 1):
 
 sim.agregator.decision_time = 1*units.day
 sim.agregator.outside_process = outside
-
-
-
-
 
 
 ####################################################################################
@@ -175,68 +175,27 @@ sim.agregator.outside_process = outside
 # lstTemperatureMonitoring += [constant_room_2]
 
 
-
-####################################################################################
-# Add room with thermostat :
-#
-# thermostat_room = sim.thermal.add(ThermalProcess.room('thermostat_room', 500, 2.5, 30))
-# coupling_thermostat_room = sim.thermal.add(ThermalCoupling('coupling_thermostat_room', 5, building, thermostat_room)) ####################################################################################################
-# lstTemperatureMonitoring += [thermostat_room]
-
-# bus1 = sim.electrical.add(ElectricalPQBus('Bus1'))
-# sim.electrical.connect("Line1", sim.electrical.bus(1), bus1, ElectricalTransmissionLine('Line1', 1000, 0.2))
-# heater2 = sim.electrical.add(ElectroThermalHeaterCooler('heater2', 1000, 1.0, thermostat_room))
-# sim.electrical.attach(heater2, bus1)
-
-# thermostat = sim.agregator.add(Thermostat('thermostat', 30.0, 0.5, thermostat_room, heater2, 'on'))
-# # Or
-
-
-####################################################################################
-# Add room with forecast controller :
-#
-# TEMP = 30
-# building2 = sim.thermal.add(ThermalProcess.room('building2', 500, 2.5, TEMP))
-# coupling_2 = sim.thermal.add(ThermalCoupling('coupling_2', 20, building2, outside)) 
-# coupling_with_building = sim.thermal.add(ThermalCoupling('coupling_with', 20, building2, building)) 
-# lstTemperatureMonitoring += [building2]
-
-# bus1 = sim.electrical.add(ElectricalPQBus('Bus1'))
-# sim.electrical.connect("Line1", sim.electrical.bus(1), bus1, ElectricalTransmissionLine('Line1', 1000, 0.2))
-# heater1 = sim.electrical.add(ElectroThermalHeaterCooler('heater1', 1000, 1.0, building2))
-# # cooler1 = sim.electrical.add(ElectroThermalHeaterCooler('heater1', 1000, 1.0, building2))
-# sim.electrical.attach(heater1, bus1)
-# # sim.electrical.attach(cooler1, bus1)
-# # thermostat = sim.agregator.add(Thermostat('thermostat', TEMP, 0.5, building2, heater1, 'on'))
-# forecastController2 = sim.agregator.add(ForecastController('forecastController2', TEMP, 3.0, building2, heater1, 'on', cost_time_series, Simulator.DAY, STEP))
-# forecastController2.add(outside, coupling_2)
-# forecastController2.max_day_historic = 20
-# lstForecast += [forecastController2]
-
-
-
-
 # Create a plot recorder that records the temperatures of all thermal processes.
-# temp = PlotRecorder('temperatures')
-# sim.record(temp, lstTemperatureMonitoring)
-# 
-# # Create a plot recorder that records the power used by the electrical heater.
-# power = PlotRecorder('delta_energy')
-# sim.record(power, lstHeater,
-#            lambda context: context.value / context.delta_time)
-# 
-# # Create a plot recorder that records the cost
-# cost = PlotRecorder('_instant_cost')
-# sim.record(cost, [lstForecast[0]],
-#            lambda context: context.value)
-# 
-# error = PlotRecorder('Error')
-# sim.record(error, lstForecast,
-#            lambda context: context.value)
-# 
-# mean = PlotRecorder('Moyenne')
-# sim.record(mean, lstForecast,
-#            lambda context: context.value)
+temp = PlotRecorder('temperature')
+sim.record(temp, lstTemperatureMonitoring, lambda context: units.convert(context.value, units.celsius))
+ 
+# Create a plot recorder that records the power used by the electrical heater.
+power = PlotRecorder('delta_energy')
+sim.record(power, lstHeater,
+           lambda context: context.value / context.delta_time)
+
+# Create a plot recorder that records the cost
+cost = PlotRecorder('_instant_cost')
+sim.record(cost, [lstForecast[0]],
+           lambda context: context.value)
+
+error = PlotRecorder('error')
+sim.record(error, lstForecast,
+           lambda context: context.value)
+
+mean = PlotRecorder('mean')
+sim.record(mean, lstForecast,
+           lambda context: context.value)
 
 
 
@@ -265,11 +224,11 @@ for forecastController in lstForecast:
 
 
 # Outputs
-# FigureSaver(temp, "Temperature").save('./output/temperature.png')
-# FigureSaver(power, "Power").save('./output/heater.png')
-# FigureSaver(cost, "Cost").save('./output/cost.png')
-# FigureSaver(error, "Erreur").save('./output/error.png')
-# FigureSaver(mean, "Moyenne").save('./output/mean.png')
+FigureSaver(temp, "Temperature").save('./forecastcontroller/output/temperature.png')
+FigureSaver(power, "Power").save('./forecastcontroller/output/heater.png')
+FigureSaver(cost, "Cost").save('./forecastcontroller/output/cost.png')
+FigureSaver(error, "Erreur").save('./forecastcontroller/output/error.png')
+FigureSaver(mean, "Moyenne").save('./forecastcontroller/output/mean.png')
 
 
 
