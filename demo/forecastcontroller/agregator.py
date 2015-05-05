@@ -1,90 +1,132 @@
 # -*- coding: utf-8 -*-
-import sys, os
+"""
+.. codeauthor:: Joel Cavat <joel.cavat@hesge.ch>
+
+This file implement the :class:`AgregatorSimulator` which is a module for gridsim. This represent a central
+controller which manage a set of local controllers implemented by :class:`AgregatorElement`.
+
+The central controller send information to the local controllers : the cost and the temperature forecast
+in degree for each slot duration.
+
+During the elapsing time, temperature could be different from the forecast. It leads the local controllers to
+difference of value. The local controllers can detect such an errors and recompute the decision. The central controllers
+could send new costs vector during the simulation, different from the forecast. In this case, the local controllers
+need to recompute their decision, too.
+
+The decision of an local controller is an on/off decision for each duration slot.
+
+The :class:`AgregatorElement` is an intermediate abstract class to receive the new cost and detect this receipt to
+recompute
+
+"""
+
+import sys
+import os
 sys.path.append(os.path.abspath("../"))
 
-from gridsim.simulation import Simulator, AbstractSimulationModule, AbstractSimulationElement, Position
+from gridsim.simulation import Simulator, AbstractSimulationElement, Position
 from gridsim.controller import ControllerSimulator, AbstractControllerElement
-from gridsim.timeseries import TimeSeriesObject
-from gridsim.thermal.element import TimeSeriesThermalProcess, ConstantTemperatureProcess
+from gridsim.thermal.element import TimeSeriesThermalProcess
 from gridsim.thermal.core import ThermalProcess, ThermalCoupling
 from gridsim.unit import units
 
+# Library used for making linear problems
 from pulp import *
 import random
 
+# Used for statistics
 import numpy
+
+# Library used for evolutionary algorithms
 from deap import base
 from deap import creator
 from deap import tools
 from deap import algorithms
 
 
-
 class AgregatorSimulator(ControllerSimulator):
-   
-    def __init__(self): 
+    """
+    This represent a central controller which manage a set of local controllers
+    implemented by :class:`AgregatorElement`.
+
+    The central controller send information to the local controllers : the cost and the temperature forecast
+    in degree for each slot duration.
+    """
+
+    def __init__(self):
+        """
+        Simulation module constructor
+        """
         super(AgregatorSimulator, self).__init__()
         self._decision_time = 0
 
         self.outside_process = None
         self.outside_temperature = {}
         self.temperature = 0
+        self.cost_reference = [0]
+        """
+        The cost reference for a day type.
+        """
 
     @property
     def decision_time(self):
+        """
+        Getter for the decision time
+        :return: the decision time
+        """
         return self._decision_time
+
     @decision_time.setter
-    def decision_time(self,value):
+    def decision_time(self, value):
+        """
+        Setter for the decision time
+        :param value: the decision time
+        """
         self._decision_time = units.value(units.convert(value, units.second))
 
     def attribute_name(self):
+        """
+        Refer to the module name
+        :return: The module name
+        """
         return 'agregator'
 
     def add(self, element):
         """
         Adds the control element to the controller simulation module.
-
         :param element: Element to add to the control simulator module.
         """
         if isinstance(element, AgregatorElement):
             element.id = len(self._controllers)
             self._controllers.append(element)
             return element
+        return None
+
 
     def calculate(self, time, delta_time):
         """
-        ...
+        Method where the temperature forecast is computed and sent to the local controllers and where
+        the cost is computed ans sent to the local controller, too
+        :param time: The actual time reference
+        :param delta_time: The delta time
         """
 
         common_unit = units.unit(units.convert(time, units.second))
         time = units.value(units.convert(time, units.second))
         delta_time = units.value(units.convert(delta_time, units.second))
 
-
-        #
-        # Decision time
-        #
+        # If this is the decision time we simulate a cost and a forecast for the temperature.
         if int(time) % int(self._decision_time) == 0:
 
-            starting_time = time
-            ending_time = time + self._decision_time
-
-            # Example of costs
-            _cost = [0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0, \
-                     2.0,2.0,3.0,3.0,4.0,4.0,2.0,2.0,2.0,2.0, \
-                     5.0,5.0,7.0,7.0,10.0,10.0,10.0,10.0,8.0,8.0, \
-                     4.0,4.0,3.0,3.0,4.0,4.0,6.0,6.0,8.0,8.0, \
-                     5.0,5.0,2.0,2.0,1.0,1.0,0.0,0.0,0.0]
-            
             j = 0
             cost = {}
             for i in range(int(time), int(time + self._decision_time), int(delta_time)):
-                cost[i] = max(0, _cost[j] + random.normalvariate(0, 1))
+                cost[i] = max(0, self.cost_reference[j] + random.normalvariate(0, 1))
                 j += 1
 
             # Add the first cost for the day next
             # TODO: Improve procedure without this fix
-            cost[int(time + self._decision_time)] = _cost[0]
+            cost[int(time + self._decision_time)] = self.cost_reference[0]
 
             for controller in self._controllers:         
                 # Push the cost & Compute
@@ -104,7 +146,7 @@ class AgregatorSimulator(ControllerSimulator):
             temperature_outside_forecast = {}
             for k in range(int(start), int(start+stop), int(delta_time)):
                 self.outside_process.set_time(units(k, common_unit))
-                corr = random.normalvariate(0, 0.4444)
+                corr = random.normalvariate(0, 0.2)
                 # corr = 0
                 # corr = 4
                 # if k > (start+stop)/2:
@@ -116,14 +158,11 @@ class AgregatorSimulator(ControllerSimulator):
             return self.outside_temperature
 
 
-
 class AgregatorElement(AbstractControllerElement):
-
     def __init__(self, friendly_name, position=Position()):
         super(AgregatorElement, self).__init__(friendly_name)
         self._cost = {}
         self._cost_has_changed = False
-
 
     @property
     def cost(self):
@@ -135,9 +174,19 @@ class AgregatorElement(AbstractControllerElement):
         self._cost_has_changed = True
 
     def total_cost(self):
-        pass
+        raise NotImplementedError('Pure abstract method!')
+
     def total_power(self):
-        pass
+        raise NotImplementedError('Pure abstract method!')
+
+    def reset(self):
+        raise NotImplementedError('Pure abstract method!')
+
+    def calculate(self, time, delta_time):
+        raise NotImplementedError('Pure abstract method!')
+
+    def update(self, time, delta_time):
+        raise NotImplementedError('Pure abstract method!')
 
 
 class ForecastController(AgregatorElement):
@@ -420,7 +469,7 @@ class ForecastController(AgregatorElement):
         #
 
         # status = problem.solve(COIN_CMD("/opt/coin-Cbc-2.8/bin/cbc"))
-        status = problem.solve(GUROBI(msg=0))
+        self.status = problem.solve(GUROBI(msg=0))
         self.status = LpStatus[problem.status]
         if self.status is 'Infeasible':
             raise RuntimeError("The problem is'nt feasible")
