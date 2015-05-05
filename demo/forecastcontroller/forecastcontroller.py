@@ -26,7 +26,6 @@ from gridsim.simulation import Simulator
 from gridsim.recorder import PlotRecorder
 from gridsim.thermal.element import TimeSeriesThermalProcess
 from gridsim.thermal.core import ThermalProcess, ThermalCoupling
-from gridsim.electrical.core import AbstractElectricalCPSElement
 from gridsim.electrical.network import ElectricalPQBus, \
     ElectricalTransmissionLine
 from gridsim.electrical.loadflow import DirectLoadFlowCalculator
@@ -34,97 +33,7 @@ from gridsim.timeseries import SortedConstantStepTimeSeriesObject
 from gridsim.iodata.input import CSVReader
 from gridsim.iodata.output import FigureSaver
 
-from agregator import ForecastController
-
-
-class ElectroThermalHeaterCooler(AbstractElectricalCPSElement):
-    """
-    Class made by Michael Clausen used in the first version of Agreflex. This class wasn't used in gridsim anymore.
-    I import it and use the same mathematical model to simulate heat pomp (heater, cooler,...).
-    """
-    def __init__(self, friendly_name, pwr, efficiency_factor, thermal_process):
-        """
-        Electrical heat or cool element. If the efficiency factor is more than 0 the element heats, if less than 0 the
-        element cools down the associated thermal process. You can even simulate heat pumps by setting the efficiency
-        factor to values greater than 1 or smaller than -1.
-
-        :param: friendly_name: User friendly name to give to the element.
-        :type friendly_name: str, unicode
-        :param: power: Electrical power of the heating/cooling element.
-        :type: float, int
-        :param: efficiency_factor: The efficiency factor [], 1.0 means a heater with 100% efficiency and -1 means a
-            cooler with 100% efficiency.
-        :type: float, int
-        :param: thermal_process: Reference to the thermal process where to put/take the energy in/out to heat/cool.
-        :type: thermal_process: ThermalProcess
-        """
-        super(ElectroThermalHeaterCooler, self).__init__(friendly_name)
-
-        if not isinstance(efficiency_factor, (float, int)):
-            raise TypeError('efficiency_factor must be a float or int!')
-        self._efficiency_factor = float(efficiency_factor)
-
-        if not isinstance(thermal_process, ThermalProcess):
-            raise TypeError('thermal_process must be of type ThermalProcess!')
-        self._thermal_process = thermal_process
-
-        self.power = pwr
-
-        self._on = False
-        """
-        Controls the heater/cooler. If this is True, the heater/cooler is active
-        and takes energy from the electrical
-        network to actually heat or cool the thermal process associated.
-        """
-
-        self.history = {}
-        """
-        Keep a history of values taken by self.on
-        """
-
-    @property
-    def on(self):
-        """
-        Getter for parameter on/off
-
-        :return: The value of the parameter. True, device is running, False, device is down
-        :rtype: Boolean
-        """
-        return self._on
-
-    @on.setter
-    def on(self, on_off):
-        """
-        Setter for parameter on/off
-        :param on_off: define if the device must work or not
-        """
-        self._on = on_off
-
-    # AbstractSimulationElement implementation.
-    def reset(self):
-        """
-        AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.reset`.
-        """
-        super(ElectroThermalHeaterCooler, self).reset()
-        self.on = False
-
-    def calculate(self, time, delta_time):
-        """
-        AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.calculate`.
-        """
-        self._internal_delta_energy = self.power * delta_time
-        if not self.on:
-            self._internal_delta_energy = 0*units.joule
-
-        self.history[time] = self.on
-
-    def update(self, time, delta_time):
-        """
-        AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.update`.
-        """
-        super(ElectroThermalHeaterCooler, self).update(time, delta_time)
-        self._thermal_process.add_energy(
-            self._delta_energy * self._efficiency_factor)
+from agregator import ForecastController, ElectroThermalHeaterCooler
 
 
 # Create simulator.
