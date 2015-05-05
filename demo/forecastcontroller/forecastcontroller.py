@@ -187,7 +187,7 @@ for i in range(MIN_INDEX_NB_DEVICES, MAX_INDEX_NB_DEVICES + 1):
     temperature = units(TEMPERATURE_INIT_REF + random.randint(-5, 10), units.degC)
 
     # Information about building parameters
-    print "building %i" %i, ":"
+    print "building %i" % i, ":"
     print "- size:", size
     print "- power:", power
     print "- hysteresis:", hysteresis
@@ -207,7 +207,7 @@ for i in range(MIN_INDEX_NB_DEVICES, MAX_INDEX_NB_DEVICES + 1):
                                                        building,
                                                        outside))
 
-    heater = sim.electrical.add(ElectroThermalHeaterCooler('heater %i' %i,
+    heater = sim.electrical.add(ElectroThermalHeaterCooler('heater %i' % i,
                                                            power*units.watt,
                                                            1.0,
                                                            building))

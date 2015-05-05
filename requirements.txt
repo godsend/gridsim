@@ -5,3 +5,5 @@ scipy>=0.10
 matplotlib>=1.3
 pint>=0.6
 enum34>=1.0
+deap>=1.0
+PuLP>=1.5.6
