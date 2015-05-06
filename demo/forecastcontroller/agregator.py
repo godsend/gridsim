@@ -15,10 +15,27 @@ need to recompute their decision, too.
 
 The decision of an local controller is an on/off decision for each duration slot.
 
+The :class:`ElectroThermalHeaterCooler` represent a model of a heat pomp (heater, cooler, ...) made by Michael Clausen.
+It was used by the first version of Agreflex and is not present in Gridsim anymore. I import it for this demo.
+
+The :class:`AgregatorSimulator` is the main controller used as a gridsim module. The local controllers must be register
+to it. This module send weather and cost forecast once by period to the local controllers and correct in real time the
+cost if there is any change
+
 The :class:`AgregatorElement` is an intermediate abstract class to receive the new cost and detect this receipt to
 recompute
 
+The :class:`ForecastController` is a forecast controller. This class optimizes a thermal process given to a
+weather forecast and a cost vector.
+
+...
+...
+...
+...
+...
+
 """
+# TODO(Joel): donner plus de précision du ForecastController au dessus
 
 import sys
 import os
@@ -111,14 +128,14 @@ class ElectroThermalHeaterCooler(AbstractElectricalCPSElement):
     # AbstractSimulationElement implementation.
     def reset(self):
         """
-        AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.reset`.
+        Default reset operation
         """
         super(ElectroThermalHeaterCooler, self).reset()
         self.on = False
 
     def calculate(self, time, delta_time):
         """
-        AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.calculate`.
+        Default calculate operation. We keep an history of operations
         """
         self._internal_delta_energy = self.power * delta_time
         if not self.on:
@@ -128,7 +145,7 @@ class ElectroThermalHeaterCooler(AbstractElectricalCPSElement):
 
     def update(self, time, delta_time):
         """
-        AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.update`.
+        Default update operation
         """
         super(ElectroThermalHeaterCooler, self).update(time, delta_time)
         self._thermal_process.add_energy(
@@ -142,11 +159,15 @@ class AgregatorSimulator(ControllerSimulator):
 
     The central controller send information to the local controllers : the cost and the temperature forecast
     in degree for each slot duration.
+
+    The cost vector must be set. We apply a variation on this cost to simulate a different cost every days. We apply
+    a variation on the real weather sent to simulate the forecast, too
     """
 
     def __init__(self):
         """
         Simulation module constructor
+
         """
         super(AgregatorSimulator, self).__init__()
         self._decision_time = 0
@@ -163,7 +184,9 @@ class AgregatorSimulator(ControllerSimulator):
     def decision_time(self):
         """
         Getter for the decision time
+
         :return: the decision time
+
         """
         return self._decision_time
 
@@ -171,21 +194,28 @@ class AgregatorSimulator(ControllerSimulator):
     def decision_time(self, value):
         """
         Setter for the decision time
+
         :param value: the decision time
+
         """
         self._decision_time = units.value(units.convert(value, units.second))
 
     def attribute_name(self):
         """
         Refer to the module name
+
         :return: The module name
+
         """
         return 'agregator'
 
     def add(self, element):
         """
         Adds the control element to the controller simulation module.
+
         :param element: Element to add to the control simulator module.
+        :type element: AgregatorElement
+
         """
         if isinstance(element, AgregatorElement):
             element.id = len(self._controllers)
@@ -197,8 +227,13 @@ class AgregatorSimulator(ControllerSimulator):
         """
         Method where the temperature forecast is computed and sent to the local controllers and where
         the cost is computed ans sent to the local controller, too
+
         :param time: The actual time reference
+        :type time
+
         :param delta_time: The delta time
+        :type time
+
         """
 
         common_unit = units.unit(units.convert(time, units.second))
@@ -234,16 +269,33 @@ class AgregatorSimulator(ControllerSimulator):
             controller.calculate(time, delta_time)
 
     def __temperature(self, start, stop, delta_time, common_unit):
+        """
+        This method compute a forecast for the temperature. It takes the real temperature and apply a variation to
+        simulate a forecast with differences
+
+        :param start: Starting time
+        :type time
+
+        :param stop: Stopping time
+        :type time
+
+        :param delta_time: Slot period time
+        :type time
+
+        :param common_unit: Unity for temperature
+        :type time
+
+        :return: A dictionnary of forecasted temperature
+        :rtype dictionary
+
+        """
 
         if self.outside_process is not None:
             temperature_outside_forecast = {}
             for k in range(int(start), int(start+stop), int(delta_time)):
                 self.outside_process.set_time(units(k, common_unit))
+                # TODO(Joel): use constants
                 corr = random.normalvariate(0, 0.2)
-                # corr = 0
-                # corr = 4
-                # if k > (start+stop)/2:
-                #     corr = -1
 
                 temperature_outside_forecast[k] = \
                     units.value(units.convert(getattr(self.outside_process, "temperature"), units.celsius)) + corr
@@ -254,40 +306,129 @@ class AgregatorSimulator(ControllerSimulator):
 
 
 class AgregatorElement(AbstractControllerElement):
+    """
+    The :class:`AgregatorElement` is an intermediate abstract class to receive
+    the new cost and detect this receipt to recompute
+    """
     def __init__(self, friendly_name, position=Position()):
+        """
+        Constructor for the abstract class AgregatorElement
+
+        :param friendly_name: The friendly name
+
+        :param position: Position of the element
+
+        """
         super(AgregatorElement, self).__init__(friendly_name, position)
         self._cost = {}
         self._cost_has_changed = False
 
     @property
     def cost(self):
+        """
+        Return the vector of costs for each slot period
+
+        :return: The vector of costs
+
+        """
         return self._cost
 
     @cost.setter
     def cost(self, value):
+        """
+        Set the new cost if a change occur. The vector of cost is set by the central controller during
+        the day.
+
+        :param value: The vector of cost
+        :type value: List
+
+        """
         # Merge the correction
         self._cost = dict(self._cost.items() + value.items())
         self._cost_has_changed = True
 
     def total_cost(self):
+        """
+        Abstract method which returns the total of costs of the whole simulation
+
+        :return: The total costs of the operation
+        """
         raise NotImplementedError('Pure abstract method!')
 
     def total_power(self):
+        """
+        Abstract method which returns the total of power consumption of the whole simulation
+
+        :return: The total power consumption of the operation
+        """
         raise NotImplementedError('Pure abstract method!')
 
     def reset(self):
+        """
+        Abstract method inherited by `AbstractControllerElement`
+        """
         raise NotImplementedError('Pure abstract method!')
 
     def calculate(self, time, delta_time):
+        """
+        Abstract method inherited by `AbstractControllerElement`
+        """
         raise NotImplementedError('Pure abstract method!')
 
     def update(self, time, delta_time):
+        """
+        Abstract method inherited by `AbstractControllerElement`
+        """
         raise NotImplementedError('Pure abstract method!')
 
 
 class ForecastController(AgregatorElement):
+    """
+    The :class:`ForecastController` is a forecast controller. This class optimizes a thermal process given to a
+    weather forecast and a cost vector.
 
+    This class is the main implementation of the algorithms used to improve power balance and power efficency.
+    Regarding to a forecast cost and forecast weather, this local controller improve on/off operations. It computes
+    the day-ahead optimization and correct computation in real time if a new cost or if the temperature forecast is
+    too different of the real values. A decision is a switch on/switch off for each slot period.
+
+    Decision operation:
+    Each period, at the begenning of the day by example, we receive cost and weather forecast. This is the day-ahead
+    operation. We first compute for each slot period if a device should operate or not. We recompute if during the day
+    we receive a new cost or if an error is detected.
+
+    Error Management:
+    There is some kind of errors.
+     * Human behavior: The temperature of a room is different that expected due to a human behavior.  By example,
+       someone force to switch on a radiator. The error can be detected and we can re-compute the decision operation
+       according to the new values.
+     * Configuration settings errors: The values set is wrong. By example, the thermal capacity, the coupling or
+       something else lead computations to wrong values. The error can be detected and we re-compute correction
+       settings value according to a historic.
+     * Weather forecast: The forecast sent at the beginning of a period is different that the real value. If the
+       error is too big and misleading results we need to act. The error can be detected according to the historic
+       of real temperature and the forecast temperature. If the error is due to a difference, we compute the
+       difference value between the forecast and the real value and we recompute the decision operation according
+       to this difference.
+
+    The main difficulties with error management is to detect what kind of error it is. We start detecting if an
+    error is due to weather forecast then if it's due to a human behavior. If this is not the case we assume that it
+    is a configuration settings error. To detect the settings correction value, we use a metaheuristic named
+    evolutionary algorithms with the historic of values. The library used is deap.
+
+    ...
+    ...
+    ...
+    ...
+    ...
+    """
+    # TODO(Joel): donner plus de précision du ForecastController au dessus
+
+    # The constants below is used for the error checking and correction of calculation
     MAX_TOTAL_ABSOLUTE_ERROR = 1.
+    """
+
+    """
     MAX_TOTAL_ERROR = 0.10
     MAX_REAL_TIME_ERROR = 0.5
     MAX_DAY_HISTORIC = 10
@@ -302,7 +443,7 @@ class ForecastController(AgregatorElement):
                  decision_time, delta_time, on_value=True, off_value=False, position=Position()):
 
         """
-        A forecast control.ler. This class optimizes a thermal process given to a weather forecast and
+        A forecast controller. This class optimizes a thermal process given to a weather forecast and
         a cost vector.
 
         :param: friendly_name: User friendly name to give to the element.
