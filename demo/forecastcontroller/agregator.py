@@ -2,6 +2,11 @@
 """
 .. codeauthor:: Joel Cavat <joel.cavat@hesge.ch>
 
+Nomenclature:
+ * Decision operation is similar to optimization process
+ * Period is the biggest unit of time related to a decision operation
+ * Slot (or step) is the smallest unit of time using for iteration. Each slot correspond to a decision (on/off)
+
 This file implement the :class:`AgregatorSimulator` which is a module for gridsim. This represent a central
 controller which manage a set of local controllers implemented by :class:`AgregatorElement`.
 
@@ -28,14 +33,46 @@ recompute
 The :class:`ForecastController` is a forecast controller. This class optimizes a thermal process given to a
 weather forecast and a cost vector.
 
-...
-...
-...
-...
-...
+This class is the main implementation of the algorithms used to improve power balance and power efficiency.
+Regarding to a forecast cost and forecast weather, this local controller improve on/off operations. It computes
+the day-ahead optimization and correct computation in real time if a new cost or if the temperature forecast is
+too different of the real values. A decision is a switch on/switch off for each slot period.
+
+Decision operation:
+Each period, at the beginning of the day by example, we receive cost and weather forecast. This is the day-ahead
+operation. We first compute for each slot period if a device should operate or not. We recompute if during the day
+we receive a new cost or if an error is detected.
+To compute the on/off decision we use linear programming with integer/boolean variables. The decision to switch
+on or switch off a device is a variable decision. We have a decision variable for each time slot of the day. The
+linear solver provide the on/off result. The data input is the cost for each slot, the power consumption of the
+device, the temperature for each slot. The optimization function aims to minimize the cost and to shift the
+device operation. It means to decide when the device should run or not.
+We assume using heat pomp as devices. It's the most difficult device to manage and the model is generic enough to
+simulate any kind of device other than heat pomp (batteries, interrupting devices, white appliances, ...).
+Each slot decision is a state which influence the next slot state, hence the difficulty.
+
+Error Management:
+There is some kind of errors.
+ * Human behavior: The temperature of a room is different that expected due to a human behavior.  By example,
+   someone force to switch on a radiator. The error can be detected and we can re-compute the decision operation
+   according to the new values.
+ * Configuration settings errors: The values set is wrong. By example, the thermal capacity, the coupling or
+   something else lead computations to wrong values. The error can be detected and we re-compute correction
+   settings value according to a historic.
+ * Weather forecast: The forecast sent at the beginning of a period is different that the real value. If the
+   error is too big and misleading results we need to act. The error can be detected according to the historic
+   of real temperature and the forecast temperature. If the error is due to a difference, we compute the
+   difference value between the forecast and the real value and we recompute the decision operation according
+   to this difference.
+ * If the user of the simulator add an adjacency room to the actual, computation lead to wrong values due to
+   the influence of this room. So we need to consider this "foreign" room.
+
+The main difficulties with error management is to detect what kind of error it is. We start detecting if an
+error is due to weather forecast then if it's due to a human behavior. If this is not the case we assume that it
+is a configuration settings error. To detect an adjacency room settings, we use a meta-heuristic named
+evolutionary/genetic algorithms with the historic of values. The library used is deap.
 
 """
-# TODO(Joel): donner plus de précision du ForecastController au dessus
 
 import sys
 import os
@@ -55,11 +92,18 @@ import random
 # Used for statistics
 import numpy
 
-# Library used for evolutionary algorithms
+# Library used for evolutionary/genetic algorithms
 from deap import base
 from deap import creator
 from deap import tools
 from deap import algorithms
+
+DEBUG = False
+
+
+def debug(msg):
+    if DEBUG is True:
+        print msg
 
 
 class ElectroThermalHeaterCooler(AbstractElectricalCPSElement):
@@ -164,6 +208,10 @@ class AgregatorSimulator(ControllerSimulator):
     a variation on the real weather sent to simulate the forecast, too
     """
 
+    # Used to simulate a forecast controller according the real value
+    MU = 0
+    VARIANCE = 0.04
+
     def __init__(self):
         """
         Simulation module constructor
@@ -250,7 +298,6 @@ class AgregatorSimulator(ControllerSimulator):
                 j += 1
 
             # Add the first cost for the day next
-            # TODO(Joel): Improve procedure without this fix
             cost[int(time + self._decision_time)] = self.cost_reference[0]
 
             for controller in self._controllers:         
@@ -285,17 +332,21 @@ class AgregatorSimulator(ControllerSimulator):
         :param common_unit: Unity for temperature
         :type time
 
-        :return: A dictionnary of forecasted temperature
+        :return: A dictionary of forecasted temperature
         :rtype dictionary
 
         """
 
+        print(self.outside_process)
         if self.outside_process is not None:
             temperature_outside_forecast = {}
             for k in range(int(start), int(start+stop), int(delta_time)):
-                self.outside_process.set_time(units(k, common_unit))
-                # TODO(Joel): use constants
-                corr = random.normalvariate(0, 0.2)
+                self.outside_process.set_time(k * units.second)
+
+                # Apply a variance with a normal distribution add to the real temperature
+                corr = random.normalvariate(AgregatorSimulator.MU, AgregatorSimulator.VARIANCE)
+                corr = 0
+                print("&&&&&&&&&&&&&&&&&&&&&&&&&&&& " , units.value(units.convert(self.outside_process.temperature, units.celsius)))
 
                 temperature_outside_forecast[k] = \
                     units.value(units.convert(getattr(self.outside_process, "temperature"), units.celsius)) + corr
@@ -384,18 +435,50 @@ class AgregatorElement(AbstractControllerElement):
 
 class ForecastController(AgregatorElement):
     """
+    This file implement the :class:`AgregatorSimulator` which is a module for gridsim. This represent a central
+    controller which manage a set of local controllers implemented by :class:`AgregatorElement`.
+
+    The central controller send information to the local controllers : the cost and the temperature forecast
+    in degree for each slot duration.
+
+    During the elapsing time, temperature could be different from the forecast. It leads the local controllers to
+    difference of value. The local controllers can detect such an errors and recompute the decision. The central
+    controllers could send new costs vector during the simulation, different from the forecast. In this case, the
+    local controllers need to recompute their decision, too.
+
+    The decision of an local controller is an on/off decision for each duration slot.
+
+    The :class:`ElectroThermalHeaterCooler` represent a model of a heat pomp (heater, cooler, ...) made by
+    Michael Clausen. It was used by the first version of Agreflex and is not present in Gridsim anymore. I import it
+    for this demo.
+
+    The :class:`AgregatorSimulator` is the main controller used as a gridsim module. The local controllers must be
+    register to it. This module send weather and cost forecast once by period to the local controllers and correct in
+    real time the cost if there is any change
+
+    The :class:`AgregatorElement` is an intermediate abstract class to receive the new cost and detect this receipt to
+    recompute
+
     The :class:`ForecastController` is a forecast controller. This class optimizes a thermal process given to a
     weather forecast and a cost vector.
 
-    This class is the main implementation of the algorithms used to improve power balance and power efficency.
+    This class is the main implementation of the algorithms used to improve power balance and power efficiency.
     Regarding to a forecast cost and forecast weather, this local controller improve on/off operations. It computes
     the day-ahead optimization and correct computation in real time if a new cost or if the temperature forecast is
     too different of the real values. A decision is a switch on/switch off for each slot period.
 
     Decision operation:
-    Each period, at the begenning of the day by example, we receive cost and weather forecast. This is the day-ahead
+    Each period, at the beginning of the day by example, we receive cost and weather forecast. This is the day-ahead
     operation. We first compute for each slot period if a device should operate or not. We recompute if during the day
     we receive a new cost or if an error is detected.
+    To compute the on/off decision we use linear programming with integer/boolean variables. The decision to switch
+    on or switch off a device is a variable decision. We have a decision variable for each time slot of the day. The
+    linear solver provide the on/off result. The data input is the cost for each slot, the power consumption of the
+    device, the temperature for each slot. The optimization function aims to minimize the cost and to shift the
+    device operation. It means to decide when the device should run or not.
+    We assume using heat pomp as devices. It's the most difficult device to manage and the model is generic enough to
+    simulate any kind of device other than heat pomp (batteries, interrupting devices, white appliances, ...).
+    Each slot decision is a state which influence the next slot state, hence the difficulty.
 
     Error Management:
     There is some kind of errors.
@@ -410,31 +493,49 @@ class ForecastController(AgregatorElement):
        of real temperature and the forecast temperature. If the error is due to a difference, we compute the
        difference value between the forecast and the real value and we recompute the decision operation according
        to this difference.
+     * If the user of the simulator add an adjacency room to the actual, computation lead to wrong values due to
+       the influence of this room. So we need to consider this "foreign" room.
 
     The main difficulties with error management is to detect what kind of error it is. We start detecting if an
     error is due to weather forecast then if it's due to a human behavior. If this is not the case we assume that it
-    is a configuration settings error. To detect the settings correction value, we use a metaheuristic named
-    evolutionary algorithms with the historic of values. The library used is deap.
+    is a configuration settings error. To detect an adjacency room settings, we use a meta-heuristic named
+    evolutionary/genetic algorithms with the historic of values. The library used is deap.
 
-    ...
-    ...
-    ...
-    ...
-    ...
     """
-    # TODO(Joel): donner plus de précision du ForecastController au dessus
 
     # The constants below is used for the error checking and correction of calculation
+
     MAX_TOTAL_ABSOLUTE_ERROR = 1.
     """
-
+    The constant is the max absolute error computed. We use it to detect during the first computation day-ahead period
+    if we need to consider errors.
     """
+
     MAX_TOTAL_ERROR = 0.10
+    """
+    Used to compute an error along the time. We can recompute the decision operation at any time if an error values
+    is growing to fast.
+    """
+
     MAX_REAL_TIME_ERROR = 0.5
+    """
+    Used to detect human behavior problem, forecast problem or setting configuration problem
+    """
+
     MAX_DAY_HISTORIC = 10
-    NEXT_STEP_MIN = 10
+    """
+    Max days using for analysing a historic. It helps to detect error only after a certain time.
+    """
+
+    DELTA_TOLERANCE = 0.05
+    """
+    Used to detect if the error is due to a difference between forecast and real temperature
+    """
 
     class Correction(object):
+        """
+        This inner class keep the current corrections settings.
+        """
         def __init__(self, thermal_conductivity, temperature):
             self.thermal_conductivity = thermal_conductivity
             self.temperature = temperature
@@ -448,29 +549,39 @@ class ForecastController(AgregatorElement):
 
         :param: friendly_name: User friendly name to give to the element.
         :type friendly_name: str, unicode
+
         :param: target_temperature: The temperature to try to maintain inside the target ThermalProcess.
         :type: target_temperature: float, int
+
         :param: hysteresis: The +- hysteresis in order to keep in an area of variation of temperature
         :type: hysteresis: float, int
+
         :param: thermal_process: The reference to the thermal process to observe.
         :type: thermal_process: ThermalProcess
+
         :param: subject: Reference to the object of which's attribute has to be changed depending on the termperature.
         :type: object
+
         :param: attribute: The name of the attribute to control as string.
         :type: str, unicode
-        :param: data_path: The file path for forecast and cost
-        :type: str, unicode
+
         :param decision_time: Step of decision
         :type decision_time: float
+
         :param delta_time: Time interval for the simulation in seconds.
         :type delta_time: float
+
         :param: on_value: The value to set for the attribute in order to turn the device "on".
-        :type: on_value: any
-        :param: off_on_value: The value to set for the attribute in order to turn the device "off".
-        :type: off_value: any
+        :type: on_value: Boolean
+
+        :param: off_value: The value to set for the attribute in order to turn the device "off".
+        :type: off_value: Boolean
+
         :param position: The position of the thermal element. Defaults to [0,0,0].
         :type position: :class:`Position`
+
         """
+
         super(ForecastController, self).__init__(friendly_name, position)
         if not isinstance(target_temperature, units.Quantity):
             raise TypeError('target_temperature')
@@ -529,11 +640,14 @@ class ForecastController(AgregatorElement):
         Value of the unit of time used to decide the optimized comsumption
         """
 
+        # Used for detecting errors
         self.error = 0
         self.count_error = 0
         self.absolute_error = 0
         self.total_error = 0
         self.total_absolute_error = 0
+
+        # Used for computing
         self.countOptimization = 0
         self.mean = target_temperature
         self.temperature_optimal = target_temperature
@@ -541,6 +655,7 @@ class ForecastController(AgregatorElement):
 
         self._outside_temperature_forecast = {}
 
+        # Used for historic, statistics, plotting, ...
         self._instant_cost = 0  # for plotting
         self._total_cost = 0
         self._total_power = 0
@@ -552,26 +667,132 @@ class ForecastController(AgregatorElement):
         self._current_temperature_correction = 0.
         self._outside_process = None
         self._outside_coupling = None
-        self._external_process = []  # not used yet
-        self._external_coupling = []  # not used yet
+        # self._external_process = []  # not used yet
+        # self._external_coupling = []  # not used yet
 
     @property
     def outside_temperature_forecast(self):
+        """
+        Getter for the temperature forecast
+        :return: A dictionary for the temperature forecast
+        """
+
         return self._outside_temperature_forecast
 
     @outside_temperature_forecast.setter
     def outside_temperature_forecast(self, value):
+        """
+        Setter for the new temperature forecast. The temperature correction is re-init.
+        :param value: A dictionary of temperature forecast
+        """
         self._current_temperature_correction = 0.
-        self._outside_temperature_forecast = units.value(value)
+        self._outside_temperature_forecast = value
 
-    # AbstractSimulationElement implementation.
     def reset(self):
         """
         AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.reset`.
         """
         pass
 
+    def calculate(self, time, delta_time):
+        """
+        Calculation step. We compute the schedule for the day during the day-ahead time. This is the optimization
+        process / decision operation.
+        """
+
+        # Update the cost vector regarding to the time
+        # We reduce this vector if we need to recompute during real time. We consider only the remaining slots period
+        self._cost = {k: v for k, v in self._cost.items() if k >= time}
+
+        # Compute decision for each delta_time
+        # If decision time or if cost has changed
+        # We can't update the actual state. So we take decision for the next step.
+        if self._cost_has_changed:
+            self._recompute_decision_operation_due_to_new_costs(time)
+
+        # Recompute in real time ?
+        # Check if we need to recompute the optimization due to a difference of forecast
+        # Compare forecast temperature with real temperature and recompute if the difference is to high.
+        # Recompute if sufficient of historic
+        if time - self.delta_time in self.temperature_optimal.keys():
+            self._detect_if_error_and_recompute_if_necessary(time)
+
+        # Historic & Stats
+        self.old_temperature = units.value(units.convert(self.thermal_process.temperature, units.celsius))
+        self._history_temperature.append(self.old_temperature)
+        self._instant_cost = self._cost[time]
+        self._total_cost += self._cost[time] * self._power_on[time]
+        self._total_power += self._power_on[time] * self.subject.power
+
+        # Decision for the next step
+        self._output_value = self.on_value if int(self._power_on[time + delta_time]) == 1 else self.off_value
+
+    def update(self, time, delta_time):
+        """
+        Update default method
+        """
+        setattr(self.subject, self.attribute, self._output_value)
+
+    def add(self, thermal_process, thermal_coupling):
+        """
+        Allow to add a thermal process with its thermal coupling
+        :param thermal_process: The thermal process
+        :param thermal_coupling: The thermal coupling associate with the thermal process
+        """
+        if not isinstance(thermal_coupling, ThermalCoupling) or thermal_coupling is None:
+            raise RuntimeError('Missing or invalid thermalCoupling reference.')
+
+        if thermal_process is not None:
+            if isinstance(thermal_process, TimeSeriesThermalProcess):
+                self._outside_process = thermal_process
+                self._outside_coupling = thermal_coupling
+                return
+            else:
+                raise RuntimeError('Can use only TimeSeriesThermalProcess')
+#            if isinstance(thermal_process, ThermalProcess):
+#                self._external_process.append(thermal_process)
+#                self._external_coupling.append(thermal_coupling)
+#                return
+
+        raise RuntimeError('Missing or invalid thermalProcess or thermalCoupling reference.')
+
+    def total_cost(self):
+        """
+        Return the sum of costs according to the whole simulation
+        :return: The sum of costs
+        """
+        return self._total_cost
+
+    def total_power(self):
+        """
+        Return the sum of power consumption according to the whole simulation
+
+        :return: The sum of power consumption
+        """
+        return self._total_power
+
     def __optimize(self, cost, first_decision=0, correction=None, delta_temperature_outside_correction=0.):
+        """
+        Optimization process. Can be use during the day-ahead decision period or in real time if errors. Set a
+        on/off value for each slot.
+
+        :param cost: Cost using for the minimization function
+        :type cost: Vector
+
+        :param first_decision: We can't decide for the current time. We need the first decision of the simulation
+
+        :param correction: Used if errors has been detected in the past
+        :type correction: Correction
+
+        :param delta_temperature_outside_correction: Used if difference of temperature has been detected. The difference
+                                                     is the delta between the forecase and the real value.
+        :type delta_temperature_outside_correction: float
+
+        :return A tuple of two dictionaries: The first dictionary : Key is the time and value is the on/off
+                                             value decision. The second dictionary : Key is the time  t and value is the
+                                             final temperature at time t.
+
+        """
 
         ###########################################################
         #
@@ -661,7 +882,7 @@ class ForecastController(AgregatorElement):
                     thermal_capacity=thermal_capacity)
 
                 problem += final_temperature[t] == outside_leverage + inner_production
-                
+
         else:
             for t in range(starting_time, ending_time, self.delta_time):
                 outside_leverage = self.__external_leverage(
@@ -682,7 +903,7 @@ class ForecastController(AgregatorElement):
                     thermal_conductivity=correction.thermal_conductivity,
                     external_temperature=correction.temperature,
                     internal_temperature=initial_temperature[t])
-                
+
                 problem += final_temperature[t] == outside_leverage + inner_production + correction_leverage
 
         for t in range(starting_time, ending_time, self.delta_time):
@@ -691,14 +912,14 @@ class ForecastController(AgregatorElement):
         problem += \
             initial_temperature[starting_time] == \
             units.value(units.convert(self.thermal_process.temperature, units.celsius))
-        
+
         problem += _power_on[starting_time] == first_decision
 
         for t in range(starting_time + self.delta_time, ending_time, self.delta_time):
             problem += initial_temperature[t] == final_temperature[t-self.delta_time]
 
         #
-        # Prepare the problem 
+        # Prepare the problem
         #
         ###########################################################
 
@@ -719,6 +940,10 @@ class ForecastController(AgregatorElement):
         ]
 
     def __is_delta_temperature_error(self):
+        """
+        Detect if there is an error due to a difference between the forecast and the real temperature
+        :return: If there is errors due to a difference of temperature
+        """
 
         ###############################################################################################################
         #
@@ -750,6 +975,8 @@ class ForecastController(AgregatorElement):
             power \
                 in self._historic_for_correction:
 
+            print(">>>> ", time, temperature_ext_forecast, temperature_ext)
+
             last_temperature = temperature[-1]
 
             outside_leverage = self.__external_leverage(
@@ -776,12 +1003,11 @@ class ForecastController(AgregatorElement):
             final_temperature = outside_leverage + inner_production + correction_leverage
 
             error += found_temp - final_temperature
-             
+
             temperature.append(final_temperature)
 
-        # TODO(Joel) Constant for 0.05
-        print "| | +", abs(error), 0.05 * len(self._historic_for_correction)
-        return abs(error) <= 0.05 * len(self._historic_for_correction)
+        debug("| | + {} {}".format(abs(error), ForecastController.DELTA_TOLERANCE * len(self._historic_for_correction)))
+        return abs(error) <= ForecastController.DELTA_TOLERANCE * len(self._historic_for_correction)
 
         #
         # Compute difference of temperature regarding to the real temperature in contrast to the forecast temperature
@@ -789,6 +1015,12 @@ class ForecastController(AgregatorElement):
         ###############################################################################################################
 
     def __check_correction(self):
+        """
+        If the historic is big enough, we can try to find the correction value if a adjacency room is set by the user
+        We use genetic algorithms to find two settings: thermal conductivity and the temperature of the adjacency room
+        :return: A tuple. First element is the correction. Second element is a boolean which precise if a better
+        correction as the current one has been found.
+        """
 
         print "| | + Check correction", len(self._historic_for_correction)
         if len(self._historic_for_correction) == 0:
@@ -810,7 +1042,7 @@ class ForecastController(AgregatorElement):
         subject_thermal_capacity = units.value(self.thermal_process.thermal_capacity)
         subject_thermal_outside_coupling = units.value(self._outside_coupling.thermal_conductivity)
 
-        # Create individual with his attributes   
+        # Create individual with his attributes
         creator.create("FitnessMinError", base.Fitness, weights=(-1.0,))
         creator.create("Individual", list, fitness=creator.FitnessMinError)
 
@@ -952,7 +1184,7 @@ class ForecastController(AgregatorElement):
         #
         temperature = [self._historic_for_correction[0][1]]
         old_score = 0.
-        score_basic = 0.  
+        score_basic = 0.
         for time, init_temp,\
             opt_temp,\
             found_temp, \
@@ -982,7 +1214,7 @@ class ForecastController(AgregatorElement):
             score_basic += abs(found_temp - final_temperature) * 10000
 
         if score_basic < old_score and score_basic < score:
-            print "| | | + reinit"            
+            print "| | | + reinit"
             return None, True
 
         if score > old_score or score == float('nan'):
@@ -1008,240 +1240,16 @@ class ForecastController(AgregatorElement):
         #
         ################################################################################################################
 
-    def calculate(self, time, delta_time):
-        """
-        AbstractSimulationElement implementation, see :func:`agreflex.core.AbstractSimulationElement.calculate`.
-        """
-
-        #
-        # Update the cost vector regarding to the time
-        #
-        self._cost = {k: v for k, v in self._cost.items() if k >= time}
-
-        ################################################################################################################
-        #
-        # Compute decision for each delta_time 
-        # If decision time or if cost has changed
-        # We can't update the actual state. So we take decision for the next step.
-        #
-
-        if self._cost_has_changed:
-
-            self._cost_has_changed = False
-
-            print "+ Decision time", int(time / self.decision_time)
-
-            # Maximum time for the current or future optimization
-            ForecastController.target_time = int(time + self.decision_time + 1 * self.delta_time)
-
-            nb_slots_optimization = len(self._cost)
-
-            # Conditions to minimize errors correction
-            if self.count_error > 0:
-                admissible_error = self.total_absolute_error / self.count_error
-
-                #
-                # Absolute error is too big
-                # 
-                if admissible_error > ForecastController.MAX_TOTAL_ABSOLUTE_ERROR / self.delta_time:
-                    print "| + absolute error override"
-                    self._current_correction, fountBetterCorrection = self.__check_correction()
-                    if fountBetterCorrection:
-                        self._historic_for_correction = []
-
-                #
-                # Precision more precise but only with a full historic
-                #
-                # TODO(Joel): Constant for 10
-                if admissible_error > ForecastController.MAX_TOTAL_ABSOLUTE_ERROR / (self.delta_time * 10) \
-                        and len(self._historic_for_correction) \
-                        > (ForecastController.MAX_DAY_HISTORIC * nb_slots_optimization):
-
-                    print "| + full historic"
-                    self._current_correction, fountBetterCorrection = self.__check_correction()
-                    self._historic_for_correction = []
-
-                self.total_absolute_error = 0.0
-                self.total_error = 0.0
-                self.count_error = 0
-
-            # Optimize
-            if int(time) not in self._power_on.keys():
-                self._power_on[int(time)] = 0
-
-            self._power_on, self.temperature_optimal = self.__optimize(
-                cost=self._cost,
-                first_decision=self._power_on[int(time)],
-                correction=self._current_correction)
-
-            print "| + classic optimized"
-
-            #
-            # Statistics and historic
-            #
-            self.countOptimization += 1
-            if len(self._history_temperature) > 0:
-                self._history_temperature = self._history_temperature[-96:]
-                self.mean = numpy.mean(self._history_temperature)
-                print "| | + Mean:", self.mean
-
-        #
-        # Compute decision for each delta_time or if cost has changed
-        #
-        ################################################################################################################
-
-        ################################################################################################################
-        #
-        # Recompute in real time ?
-        # Check if we need to recompute the optimization due to a difference of forecast
-        # Compare forecast temperature with real temperature and recompute if the difference is to high.
-        # Recompute if sufficient of historic
-        if time - self.delta_time in self.temperature_optimal.keys():
-
-            #
-            # Compute the error
-            # difference between optimal temperature computed and real temperature
-            #
-            self.error = \
-                self.temperature_optimal[time - self.delta_time] - \
-                units.value(units.convert(self.thermal_process.temperature, units.celsius))
-            self.error = self.error if abs(self.error) >= 1e-10 else 0.0
-            self.absolute_error = abs(self.error)
-            self.total_error += self.error
-            self.total_absolute_error += abs(self.error)
-            self.count_error += 1
-
-            #
-            # Historic
-            #
-            self._outside_process.set_time(time * units.second)
-            self._historic_for_correction.append((
-                time,
-                self.old_temperature,
-                self.temperature_optimal[time - self.delta_time],
-                units.value(units.convert(self.thermal_process.temperature, units.celsius)),
-                self._outside_temperature_forecast[time],
-                units.value(units.convert(getattr(self._outside_process, "temperature"), units.celsius)),
-                self._power_on[time - self.delta_time]))
-
-#            print "| >", \
-#                time, \
-#                ":", \
-#                self.absolute_error, \
-#                self.total_error, \
-#                self.total_error / self.count_error, \
-#                self.absolute_error > 2*abs(self.total_error / self.count_error)
-
-            if self.absolute_error >= ForecastController.MAX_REAL_TIME_ERROR \
-                    and self.absolute_error > 2 * abs(self.total_error / self.count_error):
-
-                print "| + current error too big", self.error
-                if self.__is_delta_temperature_error():
-
-                    #
-                    # Recompute according to the difference of temperature
-                    #
-                    self.__recompute_with_temperature_error(time)
-                    self._historic_for_correction = []
-
-                else:
-                    #
-                    # Error due to a human behavior, must recompute
-                    #
-                    self._power_on, self.temperature_optimal = self.__optimize(
-                        cost=self._cost,
-                        first_decision=self._power_on[int(time)],
-                        correction=self._current_correction)
-
-                    self.countOptimization += 1
-                    self._historic_for_correction = []
-
-                self.total_absolute_error = 0.0
-                self.total_error = 0.0
-                self.count_error = 0
-
-            elif abs(self.total_error) / self.count_error >= ForecastController.MAX_TOTAL_ERROR \
-                    and len(self._historic_for_correction) >= ForecastController.NEXT_STEP_MIN:
-                
-                print "| + total error too big", self.total_error
-
-                if self.__is_delta_temperature_error():
-                    
-                    #
-                    # Recompute according to the difference of temperature
-                    #
-                    self.__recompute_with_temperature_error(time)
-                    self._historic_for_correction = []
-
-                else:
-                    #
-                    # Compute correction due to adjacency room
-                    #
-                    self._current_correction, fountBetterCorrection = self.__check_correction()
-                    if fountBetterCorrection:
-                        #
-                        # Re-optimize with corrections
-                        #
-                        self._historic_for_correction = []
-                        self._power_on, self.temperature_optimal = self.__optimize(
-                            cost=self._cost,
-                            correction=self._current_correction)
-                        self.countOptimization += 1
-
-                self.total_absolute_error = 0.0
-                self.total_error = 0.0
-                self.count_error = 0
-                print ""
-
-        #
-        # Recompute in real time ?
-        ###############################################################################################################
-
-        #
-        # Historic & Stats
-        #
-        self.old_temperature = units.value(units.convert(self.thermal_process.temperature, units.celsius))
-        self._history_temperature.append(self.old_temperature)
-        self._instant_cost = self._cost[time]
-        self._total_cost += self._cost[time] * self._power_on[time]
-        self._total_power += self._power_on[time] * self.subject.power
-
-        #
-        # Decision for the next step
-        #
-        self._output_value = self.on_value if int(self._power_on[time + delta_time]) == 1 else self.off_value
-
-    def update(self, time, delta_time):
-        """
-        """
-        setattr(self.subject, self.attribute, self._output_value)
-
-    def add(self, thermal_process, thermal_coupling):
-        """
-        """
-
-        if not isinstance(thermal_coupling, ThermalCoupling) or thermal_coupling is None:
-            raise RuntimeError('Missing or invalid thermalCoupling reference.')
-
-        if thermal_process is not None:
-            if isinstance(thermal_process, TimeSeriesThermalProcess):
-                self._outside_process = thermal_process
-                self._outside_coupling = thermal_coupling
-                return
-            if isinstance(thermal_process, ThermalProcess):
-                self._external_process.append(thermal_process)
-                self._external_coupling.append(thermal_coupling)
-                return
-
-        raise RuntimeError('Missing or invalid thermalProcess or thermalCoupling reference.')
-
-    def total_cost(self):
-        return self._total_cost
-
-    def total_power(self):
-        return self._total_power
-
     def __external_leverage(self, thermal_capacity, thermal_conductivity, external_temperature, internal_temperature):
+        """
+        Used to compute the external (or outside) leverage. Return the inside temperature according to the parameters
+        :param thermal_capacity: Thermal capacity of the room
+        :param thermal_conductivity: Thermal conductivity with outside
+        :param external_temperature: The outside temperature
+        :param internal_temperature: The room temperature
+
+        :return: The inside temperature according all the parameters
+        """
         return (self.delta_time / thermal_capacity) \
             * (thermal_conductivity * (external_temperature - internal_temperature))
 
@@ -1251,11 +1259,25 @@ class ForecastController(AgregatorElement):
                               subject_efficiency,
                               subject_energy,
                               thermal_capacity):
+        """
+        Compute the temperature according to the heater/cooler decision
+        :param internal_temperature: Room temperature
+        :param power_on: Switch on/off the heater/cooler
+        :param subject_efficiency: Efficiency of the heat pomp
+        :param subject_energy: Energy of the heat pomp
+        :param thermal_capacity: Thermal capacity of the room
+
+        :return: Temperature according to the switch on/off decision
+        """
 
         return internal_temperature + power_on * subject_efficiency \
             * ((subject_energy / thermal_capacity) * self.delta_time)
 
     def __recompute_with_temperature_error(self, time):
+        """
+        Method used to recompute the decision operation if an forecast error is detected
+        :param time: Time
+        """
 
         print "| | + due to temperature error", 
         if len(self._history_temperature) > 0:
@@ -1287,6 +1309,174 @@ class ForecastController(AgregatorElement):
             ) - self._outside_temperature_forecast[time],\
             units.value(units.convert(getattr(self._outside_process, "temperature"), units.celsius)),\
             self._outside_temperature_forecast[time]
+
+    def _recompute_decision_operation_due_to_new_costs(self, time):
+        """
+        Re-compute the decision operation if a new costs vector has been sent
+
+        :param time: Time of computation
+        """
+
+        self._cost_has_changed = False
+
+        debug("+ Decision time {}".format(int(time / self.decision_time)))
+
+        # Maximum time for the current or future optimization
+        ForecastController.target_time = int(time + self.decision_time + 1 * self.delta_time)
+
+        nb_slots_optimization = len(self._cost)
+
+        # Conditions to minimize errors correction
+        if self.count_error > 0:
+            admissible_error = self.total_absolute_error / self.count_error
+
+            #
+            # Absolute error is too big
+            #
+            if admissible_error > ForecastController.MAX_TOTAL_ABSOLUTE_ERROR / self.delta_time:
+                debug("| + absolute error override")
+                self._current_correction, fountBetterCorrection = self.__check_correction()
+                if fountBetterCorrection:
+                    self._historic_for_correction = []
+
+            #
+            # Need a significant historic to recompute
+            #
+            if admissible_error > ForecastController.MAX_TOTAL_ABSOLUTE_ERROR \
+                    / (self.delta_time * ForecastController.MAX_DAY_HISTORIC) \
+                    and len(self._historic_for_correction) \
+                    > (ForecastController.MAX_DAY_HISTORIC * nb_slots_optimization):
+
+                debug("| + full historic")
+                self._current_correction, fountBetterCorrection = self.__check_correction()
+                self._historic_for_correction = []
+
+            self.total_absolute_error = 0.0
+            self.total_error = 0.0
+            self.count_error = 0
+
+        #
+        # Optimize process
+        #
+        if int(time) not in self._power_on.keys():
+            self._power_on[int(time)] = 0
+
+        self._power_on, self.temperature_optimal = self.__optimize(
+            cost=self._cost,
+            first_decision=self._power_on[int(time)],
+            correction=self._current_correction)
+
+        debug("| + classic optimized")
+
+        #
+        # Statistics and historic
+        #
+        self.countOptimization += 1
+        if len(self._history_temperature) > 0:
+            self._history_temperature = self._history_temperature[-96:]
+            self.mean = numpy.mean(self._history_temperature)
+            debug("| | + Mean: {}".format(self.mean))
+
+    def _detect_if_error_and_recompute_if_necessary(self, time):
+        """
+        Detect if an error is detected. If the error is too big, we recompute the decision operation
+
+        :param time: The time of operation
+        """
+
+        #
+        # Compute the error
+        # difference between optimal temperature computed and real temperature
+        #
+        self.error = \
+            self.temperature_optimal[time - self.delta_time] - \
+            units.value(units.convert(self.thermal_process.temperature, units.celsius))
+        self.error = self.error if abs(self.error) >= 1e-10 else 0.0
+        self.absolute_error = abs(self.error)
+        self.total_error += self.error
+        self.total_absolute_error += abs(self.error)
+        self.count_error += 1
+
+        #
+        # Historic
+        #
+        self._outside_process.set_time(time * units.second)
+        print time, time * units.second, self.thermal_process.temperature
+        self._historic_for_correction.append((
+            time,
+            self.old_temperature,
+            self.temperature_optimal[time - self.delta_time],
+            units.value(units.convert(self.thermal_process.temperature, units.celsius)),
+            self._outside_temperature_forecast[time],
+            units.value(units.convert(self._outside_process.temperature, units.celsius)),
+            self._power_on[time - self.delta_time]))
+        #
+        # Determine if we need to consider the error
+        #
+        if self.absolute_error >= ForecastController.MAX_REAL_TIME_ERROR \
+                and self.absolute_error > 2 * abs(self.total_error / self.count_error):
+
+            debug("| + current error too big {}".format(self.error))
+            if self.__is_delta_temperature_error():
+
+                #
+                # Recompute according to the difference of temperature regarding to the forecast
+                #
+                self.__recompute_with_temperature_error(time)
+                self._historic_for_correction = []
+
+            else:
+                #
+                # Error due to a human behavior, must recompute
+                #
+                self._power_on, self.temperature_optimal = self.__optimize(
+                    cost=self._cost,
+                    first_decision=self._power_on[int(time)],
+                    correction=self._current_correction)
+
+                self.countOptimization += 1
+                self._historic_for_correction = []
+
+            self.total_absolute_error = 0.0
+            self.total_error = 0.0
+            self.count_error = 0
+
+        elif abs(self.total_error) / self.count_error >= ForecastController.MAX_TOTAL_ERROR \
+                and len(self._historic_for_correction) >= ForecastController.MAX_DAY_HISTORIC:
+
+            debug("| + total error too big {}".format(self.total_error))
+
+            if self.__is_delta_temperature_error():
+
+                #
+                # Recompute according to the difference of temperature
+                #
+                self.__recompute_with_temperature_error(time)
+                self._historic_for_correction = []
+
+            else:
+                #
+                # Compute correction due to adjacency room
+                # Use only in the case of placing an adjacency room with a coupling to the main room
+                #
+                self._current_correction, fountBetterCorrection = self.__check_correction()
+                if fountBetterCorrection:
+                    #
+                    # Re-optimize with corrections
+                    #
+                    self._historic_for_correction = []
+                    self._power_on, self.temperature_optimal = self.__optimize(
+                        cost=self._cost,
+                        correction=self._current_correction)
+                    self.countOptimization += 1
+
+            self.total_absolute_error = 0.0
+            self.total_error = 0.0
+            self.count_error = 0
+
+            #
+            # Recompute in real time ?
+            ###############################################################################################################
 
 
 Simulator.register_simulation_module(AgregatorSimulator)

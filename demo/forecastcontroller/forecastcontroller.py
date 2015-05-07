@@ -44,7 +44,7 @@ sim.electrical.load_flow_calculator = DirectLoadFlowCalculator()
 # Basic configuration :
 #
 START_TIME = 0
-DURATION_TIME = 1 * units.day
+DURATION_TIME = 10 * units.day
 DECISION_DURATION_STEP = 1 * units.day
 PERIOD_STEP = 30 * units.minute
 
@@ -71,6 +71,12 @@ outside = sim.thermal.add(TimeSeriesThermalProcess('outside', SortedConstantStep
                                                    temperature_calculator=
                                                    lambda t: units.convert(units(t, units.degC),
                                                                            units.kelvin)))
+for i in [1800,3600,5400,7200,88200,88200*2,88200*40]:
+    outside.set_time(i * units.seconds)
+    print(outside.temperature)
+    print(outside._index)
+    print("---")
+# 1800, 3600, 5400, 7200, 900
 
 # This list is used to register and graph some information about temperature and consumptions
 lstTemperatureMonitoring = [outside]

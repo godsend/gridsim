@@ -209,6 +209,14 @@ outside = sim.thermal.add(
                              temperature_calculator=
                                 lambda t: units.convert(units(t, units.degC),
                                                         units.kelvin)))
+
+for i in [1800,3600,5400,7200, 88200, 90000, 88200*2, 88200*15]:
+    outside.set_time(i * units.seconds)
+    print(outside.temperature)
+    print(outside._index)
+    print("---")
+
+
 sim.thermal.add(ThermalCoupling('room to outside',
                                 10.0*units.thermal_conductivity,
                                 room, outside))
