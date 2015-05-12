@@ -88,6 +88,7 @@ class TimeSeriesThermalProcess(ThermalProcess):
     def __getattr__(self, item):
         # this function is not called when using thermalprocess.temperature
         # because its parent (ThermalProcess) already has a 'temperature'
+
         return getattr(self._time_series, item)
 
     def reset(self):
@@ -107,6 +108,10 @@ class TimeSeriesThermalProcess(ThermalProcess):
         self._time_series.set_time(time)
         # the parent (ThermalProcess) already has a 'temperature' in
         # its local params
+        self.temperature = self._time_series.temperature
+
+    def set_time(self, time):
+        self._time_series.set_time(time)
         self.temperature = self._time_series.temperature
 
     def update(self, time, delta_time):
