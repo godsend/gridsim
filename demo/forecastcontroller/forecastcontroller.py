@@ -29,11 +29,11 @@ from gridsim.thermal.core import ThermalProcess, ThermalCoupling
 from gridsim.electrical.network import ElectricalPQBus, \
     ElectricalTransmissionLine
 from gridsim.electrical.loadflow import DirectLoadFlowCalculator
-from gridsim.timeseries import SortedConstantStepTimeSeriesObject
+from gridsim.timeseries import SortedConstantStepTimeSeriesObject, TimeSeriesObject
 from gridsim.iodata.input import CSVReader
 from gridsim.iodata.output import FigureSaver
 
-from agregator import ForecastController, ElectroThermalHeaterCooler
+from agregator import ForecastController, ElectroThermalHeaterCooler, AgregatorSimulator
 
 
 # Create simulator.
@@ -44,7 +44,7 @@ sim.electrical.load_flow_calculator = DirectLoadFlowCalculator()
 # Basic configuration :
 #
 START_TIME = 0
-DURATION_TIME = 10 * units.day
+DURATION_TIME = 3 * units.day
 DECISION_DURATION_STEP = 1 * units.day
 PERIOD_STEP = 30 * units.minute
 
@@ -62,7 +62,11 @@ COST = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
         2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 2.0, 2.0, 2.0, 2.0,
         5.0, 5.0, 7.0, 7.0, 10.0, 10.0, 10.0, 10.0, 8.0, 8.0,
         4.0, 4.0, 3.0, 3.0, 4.0, 4.0, 6.0, 6.0, 8.0, 8.0,
-        5.0, 5.0, 2.0, 2.0, 1.0, 1.0, 0.0, 0.0, 0.0]
+        5.0, 5.0, 2.0, 2.0, 1.0, 1.0, 0.0, 0.0]
+
+assert(
+    units.value(units.convert(DECISION_DURATION_STEP, units.unit(PERIOD_STEP))) / units.value(PERIOD_STEP) == len(COST)
+)
 
 # Outside thermal element
 outside = sim.thermal.add(TimeSeriesThermalProcess('outside', SortedConstantStepTimeSeriesObject(CSVReader()),
@@ -71,12 +75,6 @@ outside = sim.thermal.add(TimeSeriesThermalProcess('outside', SortedConstantStep
                                                    temperature_calculator=
                                                    lambda t: units.convert(units(t, units.degC),
                                                                            units.kelvin)))
-for i in [1800,3600,5400,7200,88200,88200*2,88200*40]:
-    outside.set_time(i * units.seconds)
-    print(outside.temperature)
-    print(outside._index)
-    print("---")
-# 1800, 3600, 5400, 7200, 900
 
 # This list is used to register and graph some information about temperature and consumptions
 lstTemperatureMonitoring = [outside]
@@ -90,6 +88,7 @@ sim.electrical.connect("Line0", sim.electrical.bus(0), bus0, ElectricalTransmiss
 # Lists used for the graph
 lstForecast = []
 lstHeater = []
+
 
 # Creation of a set of building, their devices and their forecastcontroller and their own parameter
 for i in range(MIN_INDEX_NB_DEVICES, MAX_INDEX_NB_DEVICES + 1):
@@ -173,6 +172,7 @@ sim.record(error, lstForecast,
 mean = PlotRecorder('mean')
 sim.record(mean, lstForecast,
            lambda context: context.value)
+
 
 
 # Simulate

@@ -193,7 +193,11 @@ class ElectroThermalHeaterCooler(AbstractElectricalCPSElement):
         """
         super(ElectroThermalHeaterCooler, self).update(time, delta_time)
         self._thermal_process.add_energy(
-            self._delta_energy * self._efficiency_factor)
+            self._delta_energy * self._efficiency_factor
+        )
+
+        # HACK: Force to update the thermal process
+        self._thermal_process.update(time, delta_time)
 
 
 class AgregatorSimulator(ControllerSimulator):
@@ -210,7 +214,7 @@ class AgregatorSimulator(ControllerSimulator):
 
     # Used to simulate a forecast controller according the real value
     MU = 0
-    VARIANCE = 0.04
+    VARIANCE = 0.44
 
     def __init__(self):
         """
@@ -337,7 +341,6 @@ class AgregatorSimulator(ControllerSimulator):
 
         """
 
-        print(self.outside_process)
         if self.outside_process is not None:
             temperature_outside_forecast = {}
             for k in range(int(start), int(start+stop), int(delta_time)):
@@ -345,8 +348,7 @@ class AgregatorSimulator(ControllerSimulator):
 
                 # Apply a variance with a normal distribution add to the real temperature
                 corr = random.normalvariate(AgregatorSimulator.MU, AgregatorSimulator.VARIANCE)
-                corr = 0
-                print("&&&&&&&&&&&&&&&&&&&&&&&&&&&& " , units.value(units.convert(self.outside_process.temperature, units.celsius)))
+                # corr = 0
 
                 temperature_outside_forecast[k] = \
                     units.value(units.convert(getattr(self.outside_process, "temperature"), units.celsius)) + corr
@@ -583,6 +585,7 @@ class ForecastController(AgregatorElement):
         """
 
         super(ForecastController, self).__init__(friendly_name, position)
+
         if not isinstance(target_temperature, units.Quantity):
             raise TypeError('target_temperature')
         self.target_temperature = units.value(target_temperature)
@@ -727,6 +730,7 @@ class ForecastController(AgregatorElement):
         # Decision for the next step
         self._output_value = self.on_value if int(self._power_on[time + delta_time]) == 1 else self.off_value
 
+
     def update(self, time, delta_time):
         """
         Update default method
@@ -796,7 +800,7 @@ class ForecastController(AgregatorElement):
 
         ###########################################################
         #
-        # Set the datas
+        # Set the data
         #
 
         starting_time = sorted(cost.keys())[0]
@@ -815,7 +819,7 @@ class ForecastController(AgregatorElement):
         nb_slots_optimization = len(cost)
 
         #
-        # Set the datas
+        # Set the data
         #
         ###########################################################
 
@@ -975,8 +979,6 @@ class ForecastController(AgregatorElement):
             power \
                 in self._historic_for_correction:
 
-            print(">>>> ", time, temperature_ext_forecast, temperature_ext)
-
             last_temperature = temperature[-1]
 
             outside_leverage = self.__external_leverage(
@@ -1022,7 +1024,7 @@ class ForecastController(AgregatorElement):
         correction as the current one has been found.
         """
 
-        print "| | + Check correction", len(self._historic_for_correction)
+        debug("| | + Check correction {}".format(len(self._historic_for_correction)))
         if len(self._historic_for_correction) == 0:
             return self._current_correction, False
 
@@ -1030,7 +1032,7 @@ class ForecastController(AgregatorElement):
         # Check if the error is due to difference between real and forecasted temperature
         #
         if self.__is_delta_temperature_error():
-            print "| | | + Temperature error"
+            debug("| | | + Temperature error")
             return self._current_correction, False
 
         ###############################################################################################################
@@ -1214,17 +1216,17 @@ class ForecastController(AgregatorElement):
             score_basic += abs(found_temp - final_temperature) * 10000
 
         if score_basic < old_score and score_basic < score:
-            print "| | | + reinit"
+            debug("| | | + reinit")
             return None, True
 
         if score > old_score or score == float('nan'):
-            print "| | | + keep current correction"
+            debug("| | | + keep current correction")
             return self._current_correction, False
 
-        print "| | | + swap with correction:", best, "and", best.fitness.values[0], "fitness value [",
+        debug("| | | + swap with correction:", best, "and", best.fitness.values[0], "fitness value [",)
         if self._current_correction is None:
             c = self.Correction(best[0], best[1])
-            print c.thermal_conductivity, c.temperature, "]"
+            debug(c.thermal_conductivity, c.temperature, "]")
             return c, True
 
         c = self.Correction(
@@ -1232,7 +1234,7 @@ class ForecastController(AgregatorElement):
             best[1] + self._current_correction.temperature
         )
 
-        print c.thermal_conductivity, c.temperature, "]"
+        debug(c.thermal_conductivity, c.temperature, "]")
         return c, True
 
         #
@@ -1279,9 +1281,10 @@ class ForecastController(AgregatorElement):
         :param time: Time
         """
 
-        print "| | + due to temperature error", 
         if len(self._history_temperature) > 0:
-            print numpy.mean(self._history_temperature[-20:])
+            debug("| | + due to temperature error : {}".format(numpy.mean(self._history_temperature[-20:])))
+        else:
+            debug("| | + due to temperature error")
 
         self._current_temperature_correction = \
             units.value(
@@ -1297,7 +1300,7 @@ class ForecastController(AgregatorElement):
             correction=self._current_correction,
             delta_temperature_outside_correction=self._current_temperature_correction)
 
-        print "| | |- Correction temperature", \
+        debug("| | |- Correction temperature {} {} {}".format(
             units.value(
                 units.convert(
                     getattr(
@@ -1306,9 +1309,9 @@ class ForecastController(AgregatorElement):
                     ),
                     units.celsius
                 )
-            ) - self._outside_temperature_forecast[time],\
-            units.value(units.convert(getattr(self._outside_process, "temperature"), units.celsius)),\
-            self._outside_temperature_forecast[time]
+            ) - self._outside_temperature_forecast[time],
+            units.value(units.convert(getattr(self._outside_process, "temperature"), units.celsius)),
+            self._outside_temperature_forecast[time]))
 
     def _recompute_decision_operation_due_to_new_costs(self, time):
         """
@@ -1401,7 +1404,6 @@ class ForecastController(AgregatorElement):
         # Historic
         #
         self._outside_process.set_time(time * units.second)
-        print time, time * units.second, self.thermal_process.temperature
         self._historic_for_correction.append((
             time,
             self.old_temperature,
