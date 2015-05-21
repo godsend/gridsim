@@ -44,7 +44,7 @@ sim.electrical.load_flow_calculator = DirectLoadFlowCalculator()
 # Basic configuration :
 #
 START_TIME = 0
-DURATION_TIME = 3 * units.day
+DURATION_TIME = 360 * units.day
 DECISION_DURATION_STEP = 1 * units.day
 PERIOD_STEP = 30 * units.minute
 

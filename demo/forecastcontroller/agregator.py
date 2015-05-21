@@ -98,7 +98,7 @@ from deap import creator
 from deap import tools
 from deap import algorithms
 
-DEBUG = False
+DEBUG = True
 
 
 def debug(msg):
@@ -215,6 +215,7 @@ class AgregatorSimulator(ControllerSimulator):
     # Used to simulate a forecast controller according the real value
     MU = 0
     VARIANCE = 0.44
+    VARIANCE_DAY = 1
 
     def __init__(self):
         """
@@ -310,8 +311,7 @@ class AgregatorSimulator(ControllerSimulator):
                 controller.outside_temperature_forecast = self.__temperature(
                     time,
                     time + self._decision_time + delta_time,
-                    delta_time,
-                    common_unit)
+                    delta_time)
 
         #
         # Rest of the time
@@ -319,7 +319,7 @@ class AgregatorSimulator(ControllerSimulator):
         for controller in self._controllers:  
             controller.calculate(time, delta_time)
 
-    def __temperature(self, start, stop, delta_time, common_unit):
+    def __temperature(self, start, stop, delta_time):
         """
         This method compute a forecast for the temperature. It takes the real temperature and apply a variation to
         simulate a forecast with differences
@@ -343,12 +343,15 @@ class AgregatorSimulator(ControllerSimulator):
 
         if self.outside_process is not None:
             temperature_outside_forecast = {}
+
+            # Day variance
+            corr = random.normalvariate(AgregatorSimulator.MU, AgregatorSimulator.VARIANCE_DAY)
+
             for k in range(int(start), int(start+stop), int(delta_time)):
                 self.outside_process.set_time(k * units.second)
 
                 # Apply a variance with a normal distribution add to the real temperature
-                corr = random.normalvariate(AgregatorSimulator.MU, AgregatorSimulator.VARIANCE)
-                # corr = 0
+                corr += random.normalvariate(AgregatorSimulator.MU, AgregatorSimulator.VARIANCE)
 
                 temperature_outside_forecast[k] = \
                     units.value(units.convert(getattr(self.outside_process, "temperature"), units.celsius)) + corr
