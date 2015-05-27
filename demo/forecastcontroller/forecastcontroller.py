@@ -44,7 +44,7 @@ sim.electrical.load_flow_calculator = DirectLoadFlowCalculator()
 # Basic configuration :
 #
 START_TIME = 0
-DURATION_TIME = 360 * units.day
+DURATION_TIME = 1 * units.year
 DECISION_DURATION_STEP = 1 * units.day
 PERIOD_STEP = 30 * units.minute
 
@@ -53,8 +53,7 @@ TEMPERATURE_INIT_REF = 20
 COUPLING_OUTSIDE_REF = 20
 
 # Nb buildings with devices and controllers
-MIN_INDEX_NB_DEVICES = 1
-MAX_INDEX_NB_DEVICES = 1
+MAX_INDEX_NB_DEVICES = 5
 MAX_DAY_HISTORIC = 20  # historic for corrections
 
 # Example of costs
@@ -91,7 +90,7 @@ lstHeater = []
 
 
 # Creation of a set of building, their devices and their forecastcontroller and their own parameter
-for i in range(MIN_INDEX_NB_DEVICES, MAX_INDEX_NB_DEVICES + 1):
+for i in range(1, MAX_INDEX_NB_DEVICES + 1):
 
     # Random parameters for buildings
     size = random.randint(500, 4000)
