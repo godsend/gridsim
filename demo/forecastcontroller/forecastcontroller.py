@@ -44,7 +44,7 @@ sim.electrical.load_flow_calculator = DirectLoadFlowCalculator()
 # Basic configuration :
 #
 START_TIME = 0
-DURATION_TIME = 1 * units.year
+DURATION_TIME = 10 * units.day #1 * units.year
 DECISION_DURATION_STEP = 1 * units.day
 PERIOD_STEP = 30 * units.minute
 
@@ -53,7 +53,7 @@ TEMPERATURE_INIT_REF = 20
 COUPLING_OUTSIDE_REF = 20
 
 # Nb buildings with devices and controllers
-MAX_INDEX_NB_DEVICES = 5
+MAX_INDEX_NB_DEVICES = 1
 MAX_DAY_HISTORIC = 20  # historic for corrections
 
 # Example of costs
@@ -68,7 +68,7 @@ assert(
 )
 
 # Outside thermal element
-outside = sim.thermal.add(TimeSeriesThermalProcess('outside', SortedConstantStepTimeSeriesObject(CSVReader()),
+outside = sim.thermal.add(TimeSeriesThermalProcess('Outside Temperature', SortedConstantStepTimeSeriesObject(CSVReader()),
                                                    './data/example_time_series.csv',
                                                    lambda t: t*units.hour,
                                                    temperature_calculator=
@@ -113,7 +113,7 @@ for i in range(1, MAX_INDEX_NB_DEVICES + 1):
                                                    units.convert(temperature, units.kelvin)))
 
     # The controller need this method /!\ hack due to the new version of greedsim related to agreflex
-    building.thermal_volumic_capacity = building.thermal_capacity * building._mass
+    building.thermal_volumic_capacity = building._thermal_capacity * building._mass
 
     coupling_outside = sim.thermal.add(ThermalCoupling('building %i to outside' % i,
                                                        coupling*units.thermal_conductivity,
@@ -149,28 +149,25 @@ for i in range(1, MAX_INDEX_NB_DEVICES + 1):
 sim.agregator.decision_time = DECISION_DURATION_STEP
 sim.agregator.outside_process = outside
 
+lstTemperatureMonitoring += [sim.agregator]
 
 # Create a plot recorder that records the temperatures of all thermal processes.
-temp = PlotRecorder('temperature')
-sim.record(temp, lstTemperatureMonitoring, lambda context: units.convert(context.value, units.celsius))
+temp = PlotRecorder('temperature', units.minute, units.degC)
+sim.record(temp, lstTemperatureMonitoring)
  
 # Create a plot recorder that records the power used by the electrical heater.
-power = PlotRecorder('delta_energy')
-sim.record(power, lstHeater,
-           lambda context: context.value / context.delta_time)
+power = PlotRecorder('delta_energy', units.minute, units.joule)
+sim.record(power, lstHeater)
 
 # Create a plot recorder that records the cost
-cost = PlotRecorder('_instant_cost')
-sim.record(cost, [lstForecast[0]],
-           lambda context: context.value)
+cost = PlotRecorder('_instant_cost', units.minute, units.radian)
+sim.record(cost, [lstForecast[0]])
 
-error = PlotRecorder('error')
-sim.record(error, lstForecast,
-           lambda context: context.value)
+error = PlotRecorder('error', units.minute, units.degC)
+sim.record(error, lstForecast)
 
-mean = PlotRecorder('mean')
-sim.record(mean, lstForecast,
-           lambda context: context.value)
+mean = PlotRecorder('mean', units.minute, units.degC)
+sim.record(mean, lstForecast)
 
 
 
@@ -184,7 +181,8 @@ for forecastController in lstForecast:
     print "| - Sigma error:\t", forecastController.total_error
     print "| - Sigma error abs:\t", forecastController.total_absolute_error
     print "| - Total power:\t", forecastController.total_power()
-    print "| - Total cost:\t", forecastController.total_cost()
+    print "| - Total cost:\t\t", forecastController.total_cost()
+    print "+-------------------------------"
 
 # Outputs
 FigureSaver(temp, "Temperature").save('./forecastcontroller/output/temperature.png')

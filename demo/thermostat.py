@@ -64,13 +64,13 @@ class Thermostat(AbstractControllerElement):
         :type position: :class:`Position`
         """
         super(Thermostat, self).__init__(friendly_name, position)
-        self.target_temperature = target_temperature
+        self.target_temperature = units.value(target_temperature, units.kelvin)
         """
         The temperature to try to retain inside the observer thermal process by
         conducting an electrothermal element.
         """
 
-        self.hysteresis = hysteresis
+        self.hysteresis = units.value(hysteresis, units.kelvin)
         """
         The +- hysteresis applied to the temperature measure in order to avoid
         to fast on/off switching.
@@ -142,15 +142,11 @@ class ElectroThermalHeaterCooler(AbstractElectricalCPSElement):
 
         super(ElectroThermalHeaterCooler, self).__init__(friendly_name)
 
-        if not isinstance(efficiency_factor, (float, int)):
-            raise TypeError('efficiency_factor must be a float or int!')
-        self._efficiency_factor = float(efficiency_factor)
+        self._efficiency_factor = units.value(efficiency_factor)
 
-        if not isinstance(thermal_process, ThermalProcess):
-            raise TypeError('thermal_process must be of type ThermalProcess!')
         self._thermal_process = thermal_process
 
-        self.power = pwr
+        self.power = units.value(pwr, units.watt)
 
         self._on = False
         """
@@ -175,7 +171,7 @@ class ElectroThermalHeaterCooler(AbstractElectricalCPSElement):
     def calculate(self, time, delta_time):
         self._internal_delta_energy = self.power * delta_time
         if not self.on:
-            self._internal_delta_energy = 0*units.joule
+            self._internal_delta_energy = 0
 
     def update(self, time, delta_time):
         super(ElectroThermalHeaterCooler, self).update(time, delta_time)
@@ -201,7 +197,6 @@ room = sim.thermal.add(ThermalProcess.room('room',
                                            50*units.meter*units.meter,
                                            2.5*units.metre,
                                            units.convert(celsius, units.kelvin)))
-print room.thermal_capacity
 outside = sim.thermal.add(
     TimeSeriesThermalProcess('outside', SortedConstantStepTimeSeriesObject(CSVReader()),
                              './data/example_time_series.csv',
@@ -209,13 +204,6 @@ outside = sim.thermal.add(
                              temperature_calculator=
                                 lambda t: units.convert(units(t, units.degC),
                                                         units.kelvin)))
-
-for i in [1800,3600,5400,7200, 88200, 90000, 88200*2, 88200*15]:
-    outside.set_time(i * units.seconds)
-    print(outside.temperature)
-    print(outside._index)
-    print("---")
-
 
 sim.thermal.add(ThermalCoupling('room to outside',
                                 10.0*units.thermal_conductivity,
@@ -252,7 +240,7 @@ sim.electrical.attach(bus0, heater)
 #                __|__    |__________________________|
 #                 ---
 #
-target = units(18, units.degC)
+target = units(20, units.degC)
 # the hysteresis is a delta of temperature
 hysteresis = 1*units.delta_degC
 
@@ -262,18 +250,17 @@ thermostat = sim.controller.add(Thermostat('thermostat',
                                            room, heater, 'on'))
 
 # Create a plot recorder that records the temperatures of all thermal processes.
-temp = PlotRecorder('temperature')
+temp = PlotRecorder('temperature', units.second, units.degC)
 sim.record(temp, sim.thermal.find(has_attribute='temperature'))
 
 # Create a plot recorder that records the control value of the thermostat given
 # to the heater.
-control = PlotRecorder('on')
+control = PlotRecorder('on', units.second, bool)
 sim.record(control, sim.electrical.find(has_attribute='on'))
 
 # Create a plot recorder that records the power used by the electrical heater.
-power = PlotRecorder('delta_energy')
-sim.record(power, sim.find(friendly_name='heater'),
-           lambda context: context.value / context.delta_time)
+power = PlotRecorder('delta_energy', units.second, units.joule)
+sim.record(power, sim.find(friendly_name='heater'))
 
 print("Running simulation...")
 
